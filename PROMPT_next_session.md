@@ -1,8 +1,8 @@
-# 次セッション引き継ぎプロンプト — zenn-article-gen-v2
+# 次セッション引き継ぎプロンプト — zenn-article-gen-final-skillbase
 
 ## このセッションの作業ログ
-- GitHub repo作成: `masahiromatsuyama-bit/zenn-article-gen-v2` ✅
-- ローカルrepo初期化: `/Users/masahiromatsuyama/zenn-article-gen-v2/` ✅
+- GitHub repo作成: `masahiromatsuyama-bit/zenn-article-gen-final-skillbase` ✅
+- ローカルrepo初期化: `/Users/masahiromatsuyama/zenn-article-gen-final-skillbase/` ✅
 - MCPグローバル設定:
   - `~/.claude/mcp.json` に **playwright** + **context7** を追加 ✅
   - `.mcp.json`（このrepo）に **serena** を追加 ✅
@@ -75,7 +75,7 @@
 ## ディレクトリ構成案（未確定）
 
 ```
-zenn-article-gen-v2/
+zenn-article-gen-final-skillbase/
 ├── .claude/
 │   ├── skills/
 │   │   ├── generate-article/    # 親スキル（PDCAオーケストレータ）

@@ -6,7 +6,7 @@
       "args": [
         "--from", "serena",
         "serena-mcp",
-        "--project-dir", "/Users/masahiromatsuyama/zenn-article-gen-v2"
+        "--project-dir", "/Users/masahiromatsuyama/zenn-article-gen-final-skillbase"
       ]
     }
   }
