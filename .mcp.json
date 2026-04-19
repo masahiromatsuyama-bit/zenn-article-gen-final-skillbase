@@ -1,0 +1,13 @@
+{
+  "$schema": "https://code.claude.com/schemas/mcp.json",
+  "mcpServers": {
+    "serena": {
+      "command": "uvx",
+      "args": [
+        "--from", "serena",
+        "serena-mcp",
+        "--project-dir", "/Users/masahiromatsuyama/zenn-article-gen-v2"
+      ]
+    }
+  }
+}
