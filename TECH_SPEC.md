@@ -377,7 +377,7 @@ def compute_article_metrics(article_text: str) -> dict:
             - code_ratio (float): コードブロック文字数 / 全文字数（0.0〜1.0）
             - desu_masu_ratio (float): です・ます体の文末比率（0.0〜1.0）
             - consecutive_same_length (int): 同一文字数の段落が連続する最大連続数
-            - char_count (int): 記事全体の文字数（スペース・改行含む）
+            - code_ratio (float): コードブロック行数 / 全行数（0.0〜1.0）
     """
     ...
 
@@ -386,10 +386,10 @@ def check_hard_fail(metrics: dict) -> tuple[bool, str, float]:
     """
     ハードフェイル条件を判定する。
 
-    ハードフェイル条件:
-        1. desu_masu_ratio < 0.80 → スコア上限 0.60
-        2. char_count < 3000 → スコア上限 0.50
-        3. consecutive_same_length >= 4 → スコア上限 0.70
+    ハードフェイル条件（DEFAULT_HARD_FAIL準拠）:
+        1. code_ratio > 0.20 → スコア上限 0.60
+        2. desu_masu_ratio < 0.80 → スコア上限 0.55
+        3. consecutive_same_length > 4 → スコア上限 0.50
 
     Args:
         metrics: compute_article_metrics() の返り値
