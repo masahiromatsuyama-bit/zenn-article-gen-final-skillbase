@@ -120,16 +120,27 @@
 - 形式: `{"score_by_axis": {...}, "death_patterns": [...]}`
 
 #### FR-10: コンソリデーション＆最終化
-- Consolidatorが全イテレーションの知見を統合し最終版記事の骨格を固める
-- Finalizerが最終記事をMarkdown形式で `output/` ディレクトリに書き出す
+- **Consolidator の起動条件（v5.1）**: orchestrator が `advance_article_iter` の結果 `next_action="consolidate"` を返した時のみ。具体的には:
+  - `article_iter >= 3 AND score >= 0.80`（閾値通過時の品質統合）
+  - `article_iter == 10`（最終救済統合）
+  - iter 1-2 で閾値通過した場合は Consolidator を **スキップして直接 finalize**
+  - 旧仕様の「iter == 5 固定」は廃止
+- Consolidator は iter 1〜N の全 article.md / review.json を統合し、最高スコア iter の記事に上書きする
+- 統合後は ArticleReviewer を再 spawn して review.json を再生成し、`apply_hard_fail` + `apply_major_penalty` で最終スコアを確定する
+- Finalizer が最終記事を Markdown 形式で `output/final_article.md` に書き出す
 
 #### FR-11: 実行レポート出力
 - システム終了時にstdoutへJSON形式のレポートを出力する
 - レポートに含む項目: 最終スコア、総イテレーション数、HARDFAIL発動回数、所要時間（秒）
 
 #### FR-12: MATERIAL_FALLBACKトリガー
-- 記事PDCAイテレーション3回終了時点で記事スコアが0.70未満の場合、素材PDCAフェーズへバックトラックする
-- バックトラック後は素材PDCAを最大3イテレーション追加実行する（合計上限は元の5イテレーション制約とは独立）
+- 発動条件: `article_iter >= 3 AND score < 0.70 AND material_fallback_count < 2`
+- 発動時の処理:
+  - `output/iterations/` を `output/iterations_fallback_{count}/` にリネームしてアーカイブ（orchestrator 側）
+  - `material_iter=0`, `article_iter=0` にリセット
+  - `best_article_iter=None`, `best_article_score=0.0` にリセット（v5.1 追加。Finalizer が古い iter を参照しないようにするため）
+  - `material_fallback_count` をインクリメント
+- バックトラック後は素材 PDCA が再度最大5イテレーション走る（元の 5 iter 制約を再適用）
 - バックトラックは1ランにつき最大2回まで
 
 ### 2.2 廃止FR＋理由
@@ -205,17 +216,42 @@
 - **担当スクリプト**: `checkpoint.py`（新設、決定論的Pythonスクリプト）
 - **ファイル**: `checkpoint.json`（ランごとにリセット）
 - **`next_action` フィールド**: セッション再開時に次に実行すべきアクションを特定するためのフィールド
-  - 取りうる値: `"run_strategist"`, `"run_eval_designer"`, `"run_material_iter"`, `"material_fallback"`, `"run_article_iter"`, `"finalize"`, `"done"`
+  - 取りうる値: `"run_strategist"`, `"run_eval_designer"`, `"run_system_analyst"`, `"run_material_iter"`, `"material_fallback"`, `"run_article_iter"`, `"consolidate"`, `"finalize"`, `"done"`
 - **保存タイミング**: 各フェーズ完了直後に `checkpoint.json` を更新する
 - **復元フロー**: セッション再開時に `checkpoint.json` を読み込み、`next_action` の値からフェーズを再開する
 - **状態保持対象**: 現在のイテレーション番号、現在のスコア、レビュー履歴の件数
 
 #### FR-NEW-04: メタエージェント簡素化（Strategist + Eval Designerのみ）
 
-- **Strategist**: ランの開始時に記事テーマ・方向性を決定し、以降のフェーズへ引き渡す
+- **Strategist**: ランの開始時に記事テーマ・方向性を決定し、以降のフェーズへ引き渡す。strategy.md 先頭の YAML frontmatter に `requires_system_analysis: true/false` を必ず出力する
 - **Eval Designer**: 各フェーズの評価基準（採点軸・重み）を設計し、MaterialReviewer・ArticleReviewerへ引き渡す
 - **廃止エージェント**: Agent Editor（FR-A1廃止に対応）、MetaReviewer（FR-A2廃止に対応）
 - **合計エージェント数**: 11（v5.0の15から4削減）
+
+#### FR-NEW-05: SystemAnalyst の条件付き実行（v5.1 追加、FIX-B-1）
+
+- **起動条件**: `strategy.md` frontmatter の `requires_system_analysis: true` の場合のみ、Layer 1 EvalDesigner 完了後・Material PDCA 開始前に1回だけ実行
+- **出力**: `output/knowledge/system_analysis.md`（システム設計の構造化解説）
+- **消費者**: ThesisDesigner / Writer の入力に含める。存在しない場合は当該ステップをスキップする（入力リストから除外）
+- **checkpoint 遷移**: `advance_layer1(cp, "eval_designer", requires_system_analysis=True)` → `next_action="run_system_analyst"` → `advance_layer1(cp, "system_analyst")` → `next_action="run_material_iter"`
+
+#### FR-NEW-06: ベンチマーク記事参照による自己参照防止（v5.1 追加、FIX-D-1）
+
+- **問題**: v5.0 移植時に EvalDesigner / MaterialReviewer / ArticleReviewer の入力から `human-bench/` が抜けていたため、評価基準が「この記事の戦略で、この記事を採点する」自己参照状態になっていた
+- **仕様**:
+  - EvalDesigner は `human-bench/index.yaml` と同系統の記事 3-4 本を必ず読んで評価軸を設計する
+  - eval_criteria.md の `## ベンチマーク` セクションに参照した記事 ID を最低3件明記する
+  - MaterialReviewer / ArticleReviewer は eval_criteria.md で参照されているベンチ記事を必ず読み、各軸のスコアリングに比較コメントを含める
+
+#### FR-NEW-07: major feedback による score cap（v5.1 追加、FIX-D-2）
+
+- **問題**: v5.0/v5.1 初期実装では reviewer が major feedback を何件出してもスコアに影響しなかった
+- **仕様**: `metrics.apply_major_penalty(score, major_count)` を Article PDCA Step 5 / Material PDCA のスコア確定時に適用
+  - `major_count >= 3` → cap 0.70（MATERIAL_FALLBACK 閾値以下）
+  - `major_count >= 2` → cap 0.79（article threshold 0.80 未満）
+  - `major_count >= 1` → cap 0.84（material threshold 0.85 未満）
+  - `major_count == 0` → 変化なし
+- 「major 残存 → PDCA が通らない」を機械的に保証する
 
 ---
 

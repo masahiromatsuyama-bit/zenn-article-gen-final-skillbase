@@ -73,11 +73,14 @@ Claude Code のサブスクリプション内で完結し、別途 API 課金は
 ```
 1. checkpoint.py で現在状態を読む
 2. next_action に応じて分岐
-   - run_strategist    → Layer 1 実行
-   - run_material_iter → zenn-material-pdca を呼ぶ
-   - run_article_iter  → zenn-article-pdca を呼ぶ
-   - material_fallback → checkpoint を material_pdca に戻す
-   - finalize          → Finalizer エージェントを呼ぶ
+   - run_strategist     → Layer 1 Strategist を起動
+   - run_eval_designer  → Layer 1 EvalDesigner を起動（human-bench/ 必読）
+   - run_system_analyst → SystemAnalyst を起動（条件付き、requires_system_analysis=true 時のみ）
+   - run_material_iter  → zenn-material-pdca を呼ぶ
+   - run_article_iter   → zenn-article-pdca を呼ぶ
+   - material_fallback  → iterations/ をアーカイブ後 checkpoint を material_pdca に戻す
+   - consolidate        → Consolidator → 再 Review（iter >= 3 + 閾値通過 or iter 10 時のみ）
+   - finalize           → Finalizer エージェントを呼ぶ
 3. 完了後に checkpoint を更新して再ループ
 ```
 
@@ -98,10 +101,11 @@ Claude Code のサブスクリプション内で完結し、別途 API 課金は
 
 **責務**:
 - Phase 3a: Writer + StyleGuideUpdater（ドラフト + スタイルガイド更新）
-- Phase 3b: ArticleReviewer でスコアリング（閾値 0.80）
-- iter5 で Consolidator を起動（矛盾解消・構成再編）
+- Phase 3b: ArticleReviewer でスコアリング（閾値 0.80、`apply_hard_fail` + `apply_major_penalty` で cap 適用）
 - iter3+ でスコア < 0.70 → MATERIAL_FALLBACK をトリガー
-- スコア >= 0.80 → Finalizer → 完了
+- スコア >= 0.80 かつ iter < 3 → 直接 Finalizer
+- スコア >= 0.80 かつ iter >= 3、または iter == 10 → Consolidator 経由 → 再 Review → Finalizer
+- Consolidator 起動は orchestrator 側の `consolidate` ステージ（このスキル内で直接 spawn しない）
 
 ---
 
@@ -109,17 +113,22 @@ Claude Code のサブスクリプション内で完結し、別途 API 課金は
 
 | # | エージェント | レイヤー/フェーズ | 入力 | 出力 | 並列可否 |
 |---|------------|----------------|------|------|---------|
-| 1 | Strategist | Layer 1 | ユーザー指示 | `strategy.md` | 不可 |
-| 2 | EvalDesigner | Layer 1 | `strategy.md` | `eval_criteria.md` | 不可（Strategist後） |
-| 3 | TrendResearcher | Phase 0 | `strategy.md` | `knowledge/trends.md` | **PainExtractorと並列** |
-| 4 | PainExtractor | Phase 0 | `strategy.md` | `knowledge/reader_pains.md` | **TrendResearcherと並列** |
-| 5 | ThesisDesigner | Phase 1 | trends.md + reader_pains.md | `thesis.md` | 不可 |
-| 6 | MaterialReviewer | Phase 2 | thesis.md + materials | `materials/material_review.json` + スコア | 不可 |
-| 7 | Writer | Phase 3a | thesis.md + style_guide.md + memory.json | `article_draft.md` | 不可 |
-| 8 | StyleGuideUpdater | Phase 3a | article_draft.md + fb_log.json | `style_memory/style_guide.md` | Writerの直後 |
-| 9 | ArticleReviewer | Phase 3b | article_draft.md + eval_criteria.md | `article_review.json` + スコア | 不可 |
-| 10 | Consolidator | Phase 3b (iter5) | article_draft.md + fb_log.json | `article_draft.md`（上書き更新） | 不可 |
-| 11 | Finalizer | Phase 3b（完了時） | article_draft.md + style_guide.md | `final_article.md` + `report.json` | 不可 |
+| 1 | Strategist | Layer 1 | ユーザー指示 | `strategy.md`（`requires_system_analysis` frontmatter 必須） | 不可 |
+| 2 | EvalDesigner | Layer 1 | `strategy.md` + `human-bench/` | `eval_criteria.md` | 不可（Strategist後） |
+| 3 | SystemAnalyst | Layer 1（条件付き） | `strategy.md` + 対象ディレクトリ | `knowledge/system_analysis.md` | 不可。`requires_system_analysis=true` の時のみ EvalDesigner 後に起動 |
+| 4 | TrendResearcher | Phase 0 | `strategy.md` | `knowledge/trends.md` | **PainExtractorと並列** |
+| 5 | PainExtractor | Phase 0 | `strategy.md` | `knowledge/reader_pains.md` | **TrendResearcherと並列** |
+| 6 | ThesisDesigner | Phase 1 | trends.md + reader_pains.md + system_analysis.md（あれば） | `thesis.md` | 不可 |
+| 7 | MaterialReviewer | Phase 2 | thesis.md + eval_criteria.md + human-bench | `material_reviews/{iter}/review.json` + スコア | 不可 |
+| 8 | Writer | Phase 3a | thesis.md + system_analysis.md（あれば）+ style_guide.md + memory.json | `iterations/{iter}/article.md` | 不可 |
+| 9 | StyleGuideUpdater | Phase 3a | article.md + fb_log.json | `style_memory/style_guide.md` | Writerの直後 |
+| 10 | ArticleReviewer | Phase 3b | article.md + eval_criteria.md + human-bench | `iterations/{iter}/review.json` + スコア | 不可 |
+| 11 | Consolidator | orchestrator の consolidate ステージ | iterations/1..N/article.md + review.json | `iterations/{best_N}/article.md`（統合版で上書き） | 不可 |
+| 12 | Finalizer | orchestrator の finalize ステージ | iterations/{best_N}/article.md + style_guide.md | `final_article.md` + `report.json` | 不可 |
+
+起動条件は v5.1 で以下のように変更:
+- **SystemAnalyst**: `strategy.md` frontmatter の `requires_system_analysis: true` の場合のみ（FIX-B-1）
+- **Consolidator**: `article_iter >= 3 AND (score >= 0.80 OR iter == 10)`（旧 iter==5 固定から変更、FIX-D-3）
 
 > **注**: PDCA 1イテレーション内はすべて逐次実行（write → review → score）。
 > 例外として Phase 0 の TrendResearcher + PainExtractor のみ並列実行可。
@@ -139,8 +148,10 @@ Claude Code のサブスクリプション内で完結し、別途 API 課金は
                        ▼
 ┌─────────────────────────────────────────────────────────┐
 │  Layer 1 （初回のみ）                                    │
-│  Strategist → strategy.md                               │
-│  EvalDesigner → eval_criteria.md                        │
+│  Strategist → strategy.md (requires_system_analysis含む) │
+│  EvalDesigner(+ human-bench/) → eval_criteria.md        │
+│  [requires_system_analysis=true のみ]                   │
+│    SystemAnalyst → knowledge/system_analysis.md         │
 └──────────────────────┬──────────────────────────────────┘
                        │ next_action = run_material_iter
                        ▼
@@ -160,12 +171,15 @@ Claude Code のサブスクリプション内で完結し、別途 API 課金は
 ┌─────────────────────────────────────────────────────────┐
 │  Article PDCA  【zenn-article-pdca】                     │
 │  ┌─────────────────────────────────────────────────┐   │
-│  │ Phase 3a: Writer → article_draft.md             │   │
+│  │ Phase 3a: Writer → iterations/{iter}/article.md │   │
 │  │           StyleGuideUpdater → style_guide.md    │   │
-│  │ Phase 3b: ArticleReviewer → score               │   │
-│  │   [iter == 5] → Consolidator（矛盾解消）        │   │
-│  │   score >= 0.80 → Finalizer → DONE              │   │
-│  │   iter >= 10    → Finalizer (best) → DONE       │   │
+│  │ Phase 3b: ArticleReviewer → review.json         │   │
+│  │           apply_hard_fail + apply_major_penalty │   │
+│  │   score >= 0.80 && iter < 3                     │   │
+│  │       → Finalizer → DONE                        │   │
+│  │   score >= 0.80 && iter >= 3                    │   │
+│  │       → Consolidator → 再 Review → Finalizer    │   │
+│  │   iter == 10   → Consolidator → Finalizer       │   │
 │  │   iter >= 3 && score < 0.70                     │   │
 │  │       → MATERIAL_FALLBACK (最大2回)             │   │
 │  │   else → 次イテレーション                       │   │
@@ -183,14 +197,20 @@ Claude Code のサブスクリプション内で完結し、別途 API 課金は
 checkpoint.next_action == "run_strategist"
     ↓
 Strategist(ユーザー指示) → output/strategy.md
+  （先頭 frontmatter に requires_system_analysis: true/false）
     ↓
-EvalDesigner(strategy.md) → output/eval_criteria.md
+EvalDesigner(strategy.md + human-bench/) → output/eval_criteria.md
+  （## ベンチマーク セクションに参照ベンチ記事 ID を最低3件明記）
+    ↓
+[requires_system_analysis == true のみ]
+SystemAnalyst(strategy.md + 対象ディレクトリ) → output/knowledge/system_analysis.md
     ↓
 checkpoint 更新: phase="material_pdca", next_action="run_material_iter"
 ```
 
-- Strategist は記事テーマ・対象読者・差別化ポイントを `strategy.md` に書き出す
-- EvalDesigner は `strategy.md` を基に軸別評価基準（coherence / value / style / structure）を `eval_criteria.md` に定義
+- Strategist は記事テーマ・対象読者・差別化ポイントを `strategy.md` に書き出す。`requires_system_analysis` フラグも必ず出力
+- EvalDesigner は `strategy.md` と `human-bench/` のベンチマーク記事 3-4 本を読み、自己参照を避けた評価軸を `eval_criteria.md` に定義（v5.1 FIX-D-1）
+- SystemAnalyst は `requires_system_analysis=true` の時のみ起動し、記事対象システムの設計解説を `system_analysis.md` に書き出す。ThesisDesigner / Writer が後続で参照（v5.1 FIX-B-1）
 
 ### 5.2 Material PDCA
 
@@ -220,21 +240,25 @@ checkpoint 更新: phase="material_pdca", next_action="run_material_iter"
 ```
 [iter=1..10]
   Phase 3a:
-    Writer → article_draft.md
-             （thesis.md + style_guide.md + agent_memory/memory.json 参照）
+    Writer → iterations/{iter}/article.md
+             （thesis.md + system_analysis.md（あれば）+ style_guide.md
+               + agent_memory/memory.json + 前 iter の article/review.json 参照）
+    HARD FAIL check: fix_code_ratio / fix_desu_masu / fix_consecutive_length を適用
     StyleGuideUpdater → style_memory/style_guide.md 更新
   Phase 3b:
-    ArticleReviewer → article_review.json
-                    → score (0.0~1.0)
-  if iter == 5:
-    Consolidator(article_draft.md + fb_log.json) → article_draft.md（統合）
-  fb_log.py.record(iter, score, feedback)
-  if score >= 0.80:
-    → Finalizer → DONE
-  elif iter >= 10:
-    → Finalizer (best draft) → DONE
-  elif iter >= 3 and score < 0.70:
-    → MATERIAL_FALLBACK（material_fallback_count <= 2）
+    ArticleReviewer(human-bench/ 必読) → iterations/{iter}/review.json
+    raw_score = review.weighted_average
+    after_hf = apply_hard_fail(raw_score, hard_fail_result)
+    final_score = apply_major_penalty(after_hf, major_count)
+  fb_log: load_fb_log → record_fb → append_fb_diff
+  if final_score >= 0.80 and iter < 3:
+    → Finalizer → DONE（Consolidator skip）
+  elif final_score >= 0.80 and iter >= 3:
+    → Consolidator → ArticleReviewer 再 spawn → Finalizer → DONE
+  elif iter == 10:
+    → Consolidator → Finalizer (best_N) → DONE
+  elif iter >= 3 and final_score < 0.70:
+    → MATERIAL_FALLBACK（material_fallback_count < 2 の場合）
   else:
     → 次イテレーション（stagnation_check → gap_alert）
 ```
@@ -244,10 +268,15 @@ checkpoint 更新: phase="material_pdca", next_action="run_material_iter"
 ```
 Article PDCA iter >= 3 && score < 0.70 && material_fallback_count < 2
     ↓
-checkpoint 更新:
+orchestrator: output/iterations/ → output/iterations_fallback_{count}/ にアーカイブ
+    ↓
+trigger_material_fallback(cp):
   phase = "material_pdca"
   next_action = "run_material_iter"
-  material_iter = 0  ← リセット（再収集）
+  material_iter = 0
+  article_iter = 0           ← リセット（記事側もやり直し）
+  best_article_iter = None   ← リセット（古い iter を finalize しないため、FIX-B-2）
+  best_article_score = 0.0   ← リセット
   material_fallback_count += 1
     ↓
 Material PDCA を再実行（新しいトレンド・ペインから再取得）
@@ -257,6 +286,7 @@ Article PDCA へ再突入
 
 - MATERIAL_FALLBACK は最大 **2回** まで。3回目は無視して Article PDCA を継続。
 - フォールバック後は `best_material_score` を更新し、より良い素材を使用。
+- フォールバック前の iter は `iterations_fallback_1/`, `iterations_fallback_2/` に保全される（デバッグ用）。
 
 ### 5.5 セッション断絶回復
 
@@ -266,11 +296,14 @@ Article PDCA へ再突入
 checkpoint.py.read_checkpoint()
     ↓
 next_action に基づいてルーティング:
-  "run_strategist"    → Layer 1 から再開
-  "run_material_iter" → Material PDCA の current iter から再開
-  "run_article_iter"  → Article PDCA の current iter から再開
-  "material_fallback" → フォールバック処理から再開
-  "finalize"          → Finalizer から再開
+  "run_strategist"     → Layer 1 Strategist から再開
+  "run_eval_designer"  → Layer 1 EvalDesigner から再開
+  "run_system_analyst" → SystemAnalyst から再開（requires_system_analysis=true の時）
+  "run_material_iter"  → Material PDCA の current iter から再開
+  "run_article_iter"   → Article PDCA の current iter から再開
+  "material_fallback"  → iterations/ アーカイブ + フォールバック処理から再開
+  "consolidate"        → Consolidator → 再 Review から再開
+  "finalize"           → Finalizer から再開
 ```
 
 - 完了済みのイテレーションは再実行しない
@@ -290,11 +323,13 @@ next_action に基づいてルーティング:
 ```json
 {
   "phase": "layer1 | material_pdca | article_pdca | done",
-  "next_action": "run_strategist | run_material_iter | run_article_iter | finalize | material_fallback",
+  "next_action": "run_strategist | run_eval_designer | run_system_analyst | run_material_iter | run_article_iter | material_fallback | consolidate | finalize | done",
   "material_iter": 0,
   "article_iter": 0,
   "best_material_score": 0.0,
   "best_article_score": 0.0,
+  "best_material_iter": null,
+  "best_article_iter": null,
   "material_fallback_count": 0,
   "last_updated": "2026-04-20T12:34:56+09:00"
 }
@@ -309,22 +344,32 @@ next_action に基づいてルーティング:
 | `material_iter` | int | Material PDCA の現在イテレーション番号（1始まり） |
 | `article_iter` | int | Article PDCA の現在イテレーション番号（1始まり） |
 | `best_material_score` | float | Material PDCA 全イテレーション中の最高スコア |
-| `best_article_score` | float | Article PDCA 全イテレーション中の最高スコア |
-| `material_fallback_count` | int | MATERIAL_FALLBACK が発動した累計回数 |
+| `best_article_score` | float | Article PDCA 全イテレーション中の最高スコア（MATERIAL_FALLBACK で 0.0 にリセット） |
+| `best_material_iter` | int \| null | Material PDCA 最高スコアの iter 番号 |
+| `best_article_iter` | int \| null | Article PDCA 最高スコアの iter 番号（MATERIAL_FALLBACK で null にリセット、FIX-B-2） |
+| `material_fallback_count` | int | MATERIAL_FALLBACK が発動した累計回数（0〜2） |
 | `last_updated` | ISO8601 | 最終更新日時 |
 
 ### 状態遷移図
 
 ```
 初期値 → run_strategist
-    ↓ Layer 1 完了
+    ↓
+run_eval_designer
+    ↓ requires_system_analysis=true の時のみ
+run_system_analyst
+    ↓
 run_material_iter (material_iter++)
     ↓ score >= 0.85 or iter >= 5
 run_article_iter (article_iter++)
     ↓ iter >= 3 && score < 0.70
-material_fallback → run_material_iter (material_iter=0, fallback_count++)
-    ↓ score >= 0.80 or iter >= 10
+material_fallback → run_material_iter
+    (material_iter=0, article_iter=0, best_article_*=null, fallback_count++)
+    ↓ score >= 0.80 && iter < 3
 finalize → phase="done"
+    ↑
+    ↓ score >= 0.80 && iter >= 3 / または iter >= 10
+consolidate (Consolidator + 再 Review) → finalize → phase="done"
 ```
 
 ---
@@ -333,38 +378,50 @@ finalize → phase="done"
 
 ### output/ ディレクトリツリー
 
+実際のパスは `.claude/scripts/file_registry.py` の `Paths` クラスが唯一の情報源。
+
 ```
 output/
-├── strategy.md              # Strategist 出力。テーマ・読者・差別化・構成方針
-├── eval_criteria.md         # EvalDesigner 出力。軸別評価基準（JSON or Markdown）
+├── strategy.md                       # Strategist 出力（requires_system_analysis frontmatter 含む）
+├── eval_criteria.md                  # EvalDesigner 出力（## ベンチマーク に human-bench 参照必須）
 ├── knowledge/
-│   ├── trends.md            # TrendResearcher 出力。最新トレンド（Webサーチ結果）
-│   └── reader_pains.md      # PainExtractor 出力。読者ペイン・課題・疑問点
-├── thesis.md                # ThesisDesigner 出力。記事テーゼ・構成骨子
-├── materials/
-│   └── material_review.json # MaterialReviewer 出力。スコア・軸別評価・改善指示
+│   ├── trends.md                     # TrendResearcher 出力
+│   ├── reader_pains.md               # PainExtractor 出力
+│   └── system_analysis.md            # SystemAnalyst 出力（条件付き生成）
+├── thesis.md                         # ThesisDesigner 出力（各 iter で上書き）
+├── thesis_history/
+│   └── {iter}.md                     # 各 iter の thesis.md スナップショット（iter >= 2 から）
+├── material_reviews/
+│   └── {iter}/review.json            # MaterialReviewer 出力。{axes, weighted_average, feedback}
+├── iterations/
+│   └── {N}/
+│       ├── article.md                # Writer 出力
+│       └── review.json               # ArticleReviewer 出力
+├── iterations_fallback_{count}/      # MATERIAL_FALLBACK 時のアーカイブ
 ├── style_memory/
-│   └── style_guide.md       # StyleGuideUpdater が累積更新するスタイル規則
+│   └── style_guide.md                # StyleGuideUpdater 累積更新
 ├── agent_memory/
-│   └── memory.json          # Writer が参照する軸別記憶（過去スコア・死亡パターン）
-├── article_draft.md         # Writer 出力（最新ドラフト）
-├── article_review.json      # ArticleReviewer 出力。スコア・軸別評価・改善指示
-├── fb_log.json              # 全イテレーションのフィードバックログ（累積）
-├── checkpoint.json          # 状態機械チェックポイント（§6 参照）
-├── final_article.md         # Finalizer 出力。最終完成記事
-└── report.json              # Finalizer 出力。完了サマリー（stdout にも出力）
+│   └── memory.json                   # Writer 軸別記憶
+├── fb_log.json                       # 全イテレーションの FB ログ（entries + diffs）
+├── checkpoint.json                   # 状態機械チェックポイント（§6 参照）
+├── final_article.md                  # Finalizer 出力
+└── report.json                       # Finalizer 出力（stdout にも出力）
 ```
 
 ### 各ファイルの説明
 
 | ファイル | 更新タイミング | 内容 |
 |---------|--------------|------|
-| `strategy.md` | Layer 1 のみ | 記事の方向性・読者ペルソナ・差別化軸 |
-| `eval_criteria.md` | Layer 1 のみ | coherence/value/style/structure の評価基準 |
-| `knowledge/trends.md` | Material PDCA 各 iter Phase 0 | Webサーチによる最新動向（上書き） |
-| `knowledge/reader_pains.md` | Material PDCA 各 iter Phase 0 | ペインポイント・よくある疑問（上書き） |
+| `strategy.md` | Layer 1 のみ | 記事の方向性・読者ペルソナ・差別化軸・`requires_system_analysis` flag |
+| `eval_criteria.md` | Layer 1 のみ | 軸別評価基準 + `## ベンチマーク` セクション（human-bench 記事 ID 必須） |
+| `knowledge/system_analysis.md` | Layer 1（条件付き） | SystemAnalyst が対象ディレクトリを解析した設計解説 |
+| `knowledge/trends.md` | Material PDCA iter 1 + 各フォールバック後 | Webサーチによる最新動向（上書き） |
+| `knowledge/reader_pains.md` | Material PDCA iter 1 + 各フォールバック後 | ペインポイント・よくある疑問（上書き） |
 | `thesis.md` | Material PDCA 各 iter Phase 1 | 主張・構成・セクション骨子（上書き） |
-| `materials/material_review.json` | Material PDCA 各 iter Phase 2 | `{score, axis_scores, feedback, iter}` |
+| `thesis_history/{iter}.md` | Material PDCA iter >= 2 の spawn 前 | 前 iter の thesis スナップショット |
+| `material_reviews/{iter}/review.json` | Material PDCA 各 iter Phase 2 | `{axes, weighted_average, feedback: [{axis, severity, text}]}` |
+| `iterations/{N}/article.md` | Article PDCA 各 iter Phase 3a | Writer の出力（HARD FAIL 修正後の最終版） |
+| `iterations/{N}/review.json` | Article PDCA 各 iter Phase 3b | `{axes, weighted_average, feedback, death_patterns_detected}` |
 | `style_memory/style_guide.md` | Article PDCA 各 iter Phase 3a | 累積スタイル規則（追記更新） |
 | `agent_memory/memory.json` | Article PDCA 各 iter（Writer 更新） | `{score_by_axis, death_patterns}` |
 | `article_draft.md` | Article PDCA 各 iter Phase 3a / iter5 Consolidator | 現在最良ドラフト（上書き） |

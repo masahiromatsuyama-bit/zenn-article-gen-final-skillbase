@@ -38,9 +38,11 @@
       "enum": [
         "run_strategist",
         "run_eval_designer",
+        "run_system_analyst",
         "run_material_iter",
         "run_article_iter",
         "material_fallback",
+        "consolidate",
         "finalize",
         "done"
       ],
@@ -110,24 +112,28 @@
 | 現在の phase | 現在の next_action | 実行後の条件 | 遷移先 phase | 遷移先 next_action |
 |---|---|---|---|---|
 | `layer1` | `run_strategist` | 常に | `layer1` | `run_eval_designer` |
-| `layer1` | `run_eval_designer` | 常に | `material_pdca` | `run_material_iter` |
+| `layer1` | `run_eval_designer` | `strategy.md` の `requires_system_analysis=true` | `layer1` | `run_system_analyst` |
+| `layer1` | `run_eval_designer` | `requires_system_analysis=false` | `material_pdca` | `run_material_iter` |
+| `layer1` | `run_system_analyst` | 常に | `material_pdca` | `run_material_iter` |
 | `material_pdca` | `run_material_iter` | score >= 0.85 OR material_iter == 5 | `article_pdca` | `run_article_iter` |
 | `material_pdca` | `run_material_iter` | score < 0.85 AND material_iter < 5 | `material_pdca` | `run_material_iter` |
-| `article_pdca` | `run_article_iter` | score >= 0.80 | `article_pdca` | `finalize` |
+| `article_pdca` | `run_article_iter` | score >= 0.80 AND article_iter < 3 | `article_pdca` | `finalize` |
+| `article_pdca` | `run_article_iter` | score >= 0.80 AND article_iter >= 3 | `article_pdca` | `consolidate` |
 | `article_pdca` | `run_article_iter` | article_iter >= 3 AND score < 0.70 AND material_fallback_count < 2 | `material_pdca` | `material_fallback` |
-| `article_pdca` | `run_article_iter` | article_iter == 10 | `article_pdca` | `finalize` |
+| `article_pdca` | `run_article_iter` | article_iter == 10 | `article_pdca` | `consolidate` |
 | `article_pdca` | `run_article_iter` | 上記以外 | `article_pdca` | `run_article_iter` |
-| `material_pdca` | `material_fallback` | 常に（material_fallback_count++ / material_iter=0 リセット） | `material_pdca` | `run_material_iter` |
+| `article_pdca` | `consolidate` | Consolidator + 再 Review 完了 | `article_pdca` | `finalize` |
+| `material_pdca` | `material_fallback` | 常に（material_fallback_count++ / material_iter=0 / article_iter=0 / best_article_*リセット / `iterations/`→`iterations_fallback_{n}/`アーカイブ） | `material_pdca` | `run_material_iter` |
 | `article_pdca` | `finalize` | 常に | `done` | `done` |
 | `done` | `done` | — | `done` | `done` |
 
-**有効な `next_action` の phase別制約:**
+**有効な `next_action` の phase別制約（VALID_TRANSITIONS）:**
 
 | phase | 有効な next_action 値 |
 |---|---|
-| `layer1` | `run_strategist`, `run_eval_designer` |
+| `layer1` | `run_strategist`, `run_eval_designer`, `run_system_analyst` |
 | `material_pdca` | `run_material_iter`, `material_fallback` |
-| `article_pdca` | `run_article_iter`, `finalize` |
+| `article_pdca` | `run_article_iter`, `material_fallback`, `consolidate`, `finalize` |
 | `done` | `done` |
 
 ---
@@ -187,20 +193,24 @@
 
 #### (D) Material Fallback 発動後 — 記事スコア0.62でフォールバック1回目
 
+`trigger_material_fallback` は material_iter / article_iter だけでなく best_article_* もリセットする（v5.1 変更）:
+
 ```json
 {
   "phase": "material_pdca",
   "next_action": "run_material_iter",
   "material_iter": 0,
-  "article_iter": 3,
+  "article_iter": 0,
   "material_fallback_count": 1,
   "best_material_score": 0.80,
-  "best_article_score": 0.62,
+  "best_article_score": 0.0,
   "best_material_iter": 3,
-  "best_article_iter": 2,
+  "best_article_iter": null,
   "last_updated": "2026-04-20T12:45:00+09:00"
 }
 ```
+
+直前に存在していた `output/iterations/` は orchestrator 側で `output/iterations_fallback_1/` にリネームされている。
 
 #### (E) Done — 記事スコア0.82で正常完了
 
@@ -365,54 +375,84 @@ def resolve_path(name: str) -> Path:
 記事テキストの定量評価モジュール。ハードフェイル（即時減点）ルールを実装します。
 
 ```python
-def compute_article_metrics(article_text: str) -> dict:
+@dataclass
+class ArticleMetrics:
+    code_ratio: float                    # コードブロック内行数 / 全行数
+    desu_masu_ratio: float               # です・ます体の文末比率
+    max_consecutive_same_length: int     # ±10字以内の同長文が連続した最大数
+
+
+@dataclass
+class HardFailResult:
+    applied: bool           # いずれかの HARD FAIL 条件にヒットした場合 True
+    cap: float | None       # 適用される score cap（複数ヒット時は min）
+    reasons: list[str]      # "code_ratio 0.25 > 0.20" 等のヒット理由（複数可）
+
+
+# v5.1 既定閾値（metrics.py の DEFAULT_HARD_FAIL と一致）
+DEFAULT_HARD_FAIL = {
+    "code_ratio_limit": 0.20,
+    "code_ratio_cap": 0.60,
+    "desu_masu_min": 0.80,
+    "desu_masu_cap": 0.55,
+    "consecutive_length_max": 4,
+    "consecutive_length_cap": 0.50,
+}
+
+
+def compute_article_metrics(article_text: str) -> ArticleMetrics:
+    """記事テキストから定量メトリクスを計算する。"""
+    ...
+
+
+def check_hard_fail(metrics: ArticleMetrics, hf: dict | None = None) -> HardFailResult:
     """
-    記事テキストから定量メトリクスを計算する。
+    HARD FAIL 条件を判定し HardFailResult を返す。
 
-    Args:
-        article_text: 評価対象の記事テキスト（Markdown形式）
+    判定条件（hf=None の場合は DEFAULT_HARD_FAIL を使用）:
+        1. code_ratio > code_ratio_limit (0.20)     → cap=code_ratio_cap (0.60)
+        2. desu_masu_ratio < desu_masu_min (0.80)   → cap=desu_masu_cap (0.55)
+        3. max_consecutive_same_length > consecutive_length_max (4)
+                                                    → cap=consecutive_length_cap (0.50)
 
-    Returns:
-        dict:
-            - code_ratio (float): コードブロック文字数 / 全文字数（0.0〜1.0）
-            - desu_masu_ratio (float): です・ます体の文末比率（0.0〜1.0）
-            - consecutive_same_length (int): 同一文字数の段落が連続する最大連続数
-            - code_ratio (float): コードブロック行数 / 全行数（0.0〜1.0）
+    複数条件にヒットした場合、cap は最小値を採用する。
     """
     ...
 
 
-def check_hard_fail(metrics: dict) -> tuple[bool, str, float]:
+def apply_hard_fail(review_score: float, hard_fail: HardFailResult) -> float:
     """
-    ハードフェイル条件を判定する。
+    HARD FAIL cap を適用して最終スコアを返す。
 
-    ハードフェイル条件（DEFAULT_HARD_FAIL準拠）:
-        1. code_ratio > 0.20 → スコア上限 0.60
-        2. desu_masu_ratio < 0.80 → スコア上限 0.55
-        3. consecutive_same_length > 4 → スコア上限 0.50
-
-    Args:
-        metrics: compute_article_metrics() の返り値
-
-    Returns:
-        tuple:
-            - is_hard_fail (bool): いずれかのハードフェイル条件に該当する場合 True
-            - reason (str): 該当した条件の説明（複数の場合は最初にヒットした条件）
-            - score_cap (float): 適用されるスコア上限値（ハードフェイルなしの場合 1.0）
+    hard_fail.applied が False または cap が None の場合は review_score をそのまま返す。
+    そうでなければ min(review_score, hard_fail.cap) を返す。
     """
     ...
 
 
-def apply_hard_fail(score: float, metrics: dict) -> float:
+def apply_major_penalty(score: float, major_count: int) -> float:
     """
-    ハードフェイルキャップを適用したスコアを返す。
+    major feedback の件数に応じてスコアに cap を適用する（v5.1 追加）。
 
-    Args:
-        score: 評価エージェントが算出した生スコア（0.0〜1.0）
-        metrics: compute_article_metrics() の返り値
+    cap ルール（閾値との整合を保つための設計）:
+        major_count >= 3 → cap = 0.70  （MATERIAL_FALLBACK 閾値以下に落とす）
+        major_count >= 2 → cap = 0.79  （article threshold 0.80 未満）
+        major_count >= 1 → cap = 0.84  （material threshold 0.85 未満）
+        major_count == 0 → 変化なし
 
-    Returns:
-        float: ハードフェイルキャップ適用後のスコア（score と score_cap の小さい方）
+    major feedback が残っている限り該当 PDCA の閾値を突破できなくなり、
+    次 iter での改善が強制される。
+    """
+    ...
+
+
+def fix_code_ratio(article_text: str, target_ratio: float = 0.18) -> str:
+    """
+    コードブロック内の空行と単独コメント行（先頭 '#' / '//'）のみを除去して
+    code_ratio を target_ratio 以下に抑える（v5.1 追加、FIX-A-2 対応）。
+
+    実質的なコード行は削除しない。最大 3 反復で target 未達なら現状の文字列を返す
+    （以降は cap 適用 + フィードバックで Writer 側に改善を促す）。
     """
     ...
 
@@ -460,33 +500,56 @@ def fix_consecutive_length(text: str) -> str:
 **重要バグ修正（v5.0→v5.1）:** `save_fb_log` の `diffs` 引数が v5.0 では常に空リスト `[]` で呼び出されていました。v5.1 では `compute_fb_diff(entries)` の結果を必ず渡してください。
 
 ```python
-def load_fb_log(path: Path) -> dict:
+@dataclass
+class FBEntry:
+    """単一フィードバックエントリ（fb_log.json の entries 要素）"""
+    id: str               # "FB-M-001" / "FB-A-001" 形式（M=material, A=article）
+    iteration: int        # エントリを記録した iter 番号
+    phase: str            # "material" | "article"
+    axis: str             # レビュー軸名
+    severity: str         # "major" | "minor"
+    description: str      # フィードバック本文
+    status: str           # "new" | "persisted" | "resolved"
+    created_at: int       # 生成 iter
+    resolved_at: int | None = None
+
+
+@dataclass
+class FBDiff:
+    """2 iter 間のフィードバック差分サマリー（fb_log.json の diffs 要素）"""
+    resolution_rate: float          # 前 iter の active エントリのうち解決された割合
+    new_count: int                  # status="new" の件数
+    persisted_count: int            # status="persisted" の件数
+    major_persisted_count: int      # 上記のうち severity="major"
+    major_persisted_streak: int     # major_persisted_count>0 が連続している iter 数
+
+
+def load_fb_log(path: str) -> list[FBEntry]:
     """
-    フィードバックログファイルを読み込む。
+    フィードバックログファイルを読み込み、entries 部分のみを返す。
 
     Args:
         path: fb_log.json のパス（Paths.FB_LOG）
 
     Returns:
-        dict:
-            - entries (list): フィードバックエントリのリスト
-            - diffs (list): イテレーション間スコア差分のリスト
-        ファイルが存在しない場合: {"entries": [], "diffs": []}
+        list[FBEntry]: エントリリスト。ファイルが存在しない場合は空リスト。
     """
     ...
 
 
-def save_fb_log(path: Path, entries: list, diffs: list) -> None:
+def save_fb_log(path: str, entries: list[FBEntry], diffs: list[dict]) -> None:
     """
     フィードバックログをファイルに保存する。
 
-    【v5.1修正】diffs には必ず compute_fb_diff(entries) の結果を渡すこと。
-    空リスト [] を渡すと差分追跡が機能しなくなる（v5.0バグ再現）。
+    【v5.1 バグ修正】diffs が空リストで entries が存在する場合は、
+    内部で _compute_simple_diffs(entries) による自動計算にフォールバックする。
+    canonical な書き込みパスは append_fb_diff()。
 
     Args:
         path: 書き込み先パス（Paths.FB_LOG）
-        entries: record_fb() で構築したエントリリスト
-        diffs: compute_fb_diff() が返す差分リスト
+        entries: record_fb() で構築した FBEntry リスト
+        diffs: dict のリスト（FBDiff を asdict 化したもの）。
+               空リストの場合、auto-compute フォールバックが働く
 
     Returns:
         None
@@ -494,64 +557,85 @@ def save_fb_log(path: Path, entries: list, diffs: list) -> None:
     ...
 
 
-def record_fb(entries: list, iter_num: int, score: float, feedback: str) -> list:
+def record_fb(
+    entries: list[FBEntry],
+    new_feedbacks: list[dict],
+    iteration: int,
+    phase: str,
+) -> list[FBEntry]:
     """
-    新しいフィードバックエントリをリストに追加する。
+    review.json の feedback（dict リスト）を既存の FBEntry リストに反映する。
+
+    - 同一 axis + severity の既存 new/persisted エントリがあれば status="persisted" 化
+    - 一致しない既存エントリは status="resolved"（resolved_at=iteration）に
+    - マッチしない new_feedbacks は新規 FBEntry として append（ID は連番採番）
 
     Args:
-        entries: 既存のエントリリスト（load_fb_log()["entries"]）
-        iter_num: イテレーション番号（checkpoint の article_iter または material_iter）
-        score: 当該イテレーションのスコア（0.0〜1.0）
-        feedback: レビューエージェントが生成したフィードバックテキスト
+        entries: 既存の FBEntry リスト（load_fb_log() の返り値）
+        new_feedbacks: 今 iter の review.json["feedback"] —
+                       各要素は {"axis": str, "severity": str, "text": str}
+        iteration: 現在の iter 番号
+        phase: "material" | "article"
 
     Returns:
-        list: 新エントリを追加した updated entries リスト
-
-    エントリ構造:
-        {"iter": int, "score": float, "feedback": str, "timestamp": "ISO8601"}
+        list[FBEntry]: 更新後のエントリリスト（元リストは破壊しない）
     """
     ...
 
 
-def compute_fb_diff(entries: list) -> list:
+def compute_fb_diff(
+    prev_entries: list[FBEntry],
+    curr_entries: list[FBEntry],
+) -> FBDiff:
     """
-    イテレーション間のスコア差分を計算する。
+    前 iter と現 iter のエントリ間差分を FBDiff として返す。
 
     Args:
-        entries: record_fb() で構築したエントリリスト
+        prev_entries: 前 iter の FBEntry リスト
+        curr_entries: 現 iter の FBEntry リスト（record_fb の返り値）
 
     Returns:
-        list of dict:
-            - iter (int): イテレーション番号（N番目の差分はN-1→Nの変化）
-            - score_delta (float): 前イテレーションからのスコア変化量（正=改善、負=悪化）
-            - resolved (bool): score_delta > 0.0 の場合 True（改善したと見なす）
+        FBDiff: resolution_rate, new_count, persisted_count,
+                major_persisted_count, major_persisted_streak を含む
 
-    注意: entries が1件以下の場合は空リストを返す
+    注意: major_persisted_streak は compute_fb_diff だけでは確定せず、
+          append_fb_diff が過去 diff 履歴を読んで加算する
     """
     ...
 
 
-def check_fb_stagnation(entries: list, window: int = 3) -> bool:
+def append_fb_diff(
+    path: str,
+    entries: list[FBEntry],
+    prev_entries: list[FBEntry],
+    iteration: int,
+    phase: str,
+) -> FBDiff:
     """
-    直近 `window` イテレーションでスコアが停滞しているか判定する。
-
-    停滞判定: 直近 window 件のスコアの最大値と最小値の差が 0.01 以下
+    compute_fb_diff を実行し、streak を加算した上で fb_log.json に追記する
+    canonical 書き込みパス。INSTRUCTIONS から呼ぶ際はこれを使い、
+    save_fb_log(..., []) による empty-diff 書き込みは避けること。
 
     Args:
-        entries: フィードバックエントリリスト
-        window: 判定対象の直近イテレーション数（デフォルト: 3）
+        path: fb_log.json のパス
+        entries: record_fb() の返り値
+        prev_entries: record_fb 呼び出し前の entries（= load_fb_log の返り値）
+        iteration: 現在の iter
+        phase: "material" | "article"
 
     Returns:
-        bool: 停滞している場合 True、entries が window 件未満の場合 False
+        FBDiff: 追記した diff（streak 更新済み）
     """
     ...
 ```
+
+**v5.1 変更**: `check_fb_stagnation` と `StagnationResult` dataclass は v5.1 で削除された（停滞検出は `stagnation_check.detect_stagnation` / `should_trigger_gap_alert` に一本化）。
 
 ---
 
 ### 3.4 stagnation_check.py（NEW）
 
-停滞検出の専用モジュール。`fb_log.py` の `check_fb_stagnation` より詳細な分析を提供します。
+停滞検出の専用モジュール。v5.1 では `fb_log.check_fb_stagnation` を削除してこの実装に一本化（tolerance=0.01 の単一基準に統一）。
 
 ```python
 def compute_resolution_rate(diffs: list) -> float:
@@ -722,38 +806,110 @@ def write_checkpoint(path: Path, state: dict) -> None:
 
 def route_next_action(checkpoint: dict) -> str:
     """
-    チェックポイントから次のアクション識別子を返す。
-
-    状態の整合性検証を行い、不正な状態の場合は ValueError を送出する。
-
-    検証項目:
-        - phase と next_action の組み合わせが状態遷移テーブルに従っているか
-        - material_iter が 0〜5 の範囲内か
-        - article_iter が 0〜10 の範囲内か
-        - material_fallback_count が 0〜2 の範囲内か
+    checkpoint["next_action"] をそのまま返す（v5.1 実装はバリデーションなし）。
 
     Args:
         checkpoint: read_checkpoint() が返す状態 dict
 
     Returns:
-        str: checkpoint["next_action"] の値
-
-    Raises:
-        ValueError: 状態が不正（遷移テーブル違反、範囲外の値）の場合
+        str: checkpoint["next_action"] の値（キー欠落時は "run_strategist"）
     """
     ...
 
 
 def is_complete(checkpoint: dict) -> bool:
+    """phase == "done" の場合 True を返す。"""
+    ...
+
+
+def advance_layer1(
+    checkpoint: dict,
+    completed_step: str,
+    requires_system_analysis: bool = False,
+) -> dict:
     """
-    チェックポイントが完了状態かを判定する。
+    Layer 1 のステップ完了後の状態を返す。
+
+    遷移:
+        completed_step="strategist"        → next_action="run_eval_designer"
+        completed_step="eval_designer":
+            requires_system_analysis=True  → next_action="run_system_analyst"
+            requires_system_analysis=False → phase="material_pdca",
+                                             next_action="run_material_iter"
+        completed_step="system_analyst"    → phase="material_pdca",
+                                             next_action="run_material_iter"
 
     Args:
-        checkpoint: チェックポイント状態 dict
-
-    Returns:
-        bool: phase == "done" の場合 True
+        checkpoint: 現在の状態
+        completed_step: "strategist" | "eval_designer" | "system_analyst"
+        requires_system_analysis: strategy.md の frontmatter から取得したフラグ
+            （eval_designer 完了時のみ参照される）
     """
+    ...
+
+
+def advance_material_iter(
+    checkpoint: dict,
+    score: float,
+    threshold: float = 0.85,
+    max_iter: int = 5,
+) -> dict:
+    """
+    Material PDCA 1 iter 完了後の状態を返す（iter++、best 更新、遷移判定）。
+
+    score >= threshold OR material_iter >= max_iter
+        → phase="article_pdca", next_action="run_article_iter"
+    それ以外は next_action="run_material_iter"（ループ継続）
+    """
+    ...
+
+
+def advance_article_iter(
+    checkpoint: dict,
+    score: float,
+    threshold: float = 0.80,
+    max_iter: int = 10,
+    fallback_max: int = 2,
+) -> dict:
+    """
+    Article PDCA 1 iter 完了後の状態を返す。
+
+    遷移:
+        score >= threshold AND article_iter >= 3        → next_action="consolidate"
+        score >= threshold AND article_iter < 3         → next_action="finalize"
+        article_iter >= 3 AND score < 0.70 AND
+            material_fallback_count < fallback_max      → next_action="material_fallback"
+        article_iter >= max_iter                        → next_action="consolidate"
+        上記以外                                          → next_action="run_article_iter"
+
+    Consolidator は iter >= 3 かつ finalize 直前のみ実行される（v5.1 変更）。
+    """
+    ...
+
+
+def trigger_material_fallback(checkpoint: dict) -> dict:
+    """
+    Material PDCA にバックトラックする。
+
+    更新:
+        phase="material_pdca"
+        next_action="run_material_iter"
+        material_fallback_count += 1
+        article_iter=0, material_iter=0
+        best_article_iter=None, best_article_score=0.0（v5.1 追加: Finalizer が
+            古い iter を指さないよう明示リセット。orchestrator 側で
+            iterations/ → iterations_fallback_{count}/ のリネームと組み合わせる）
+    """
+    ...
+
+
+def advance_after_consolidate(checkpoint: dict) -> dict:
+    """Consolidator + 再 Review 完了後に next_action="finalize" にする（v5.1 追加）。"""
+    ...
+
+
+def mark_done(checkpoint: dict) -> dict:
+    """phase="done", next_action="done" にして完了状態にマーク。"""
     ...
 ```
 
