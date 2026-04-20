@@ -109,6 +109,8 @@ if cp_mod:
               cp["phase"] == "material_pdca"
               and cp["material_fallback_count"] == 1
               and cp["article_iter"] == 0)
+        check("material_fallback → material_iter reset to 0 (A-1 fix)",
+              cp["material_iter"] == 0)
 
         # Back to article, iter 3, score=0.62 (<0.70, fallback_count=1 → still can fallback)
         cp["phase"] = "article_pdca"

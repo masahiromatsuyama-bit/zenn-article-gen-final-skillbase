@@ -34,20 +34,27 @@ VALID_TRANSITIONS: Dict[str, list] = {
 
 
 def read_checkpoint(path: Path) -> Dict:
-    """If not exists, returns fresh start state (layer1 / run_strategist)."""
+    """If not exists or corrupted, returns fresh start state (layer1 / run_strategist)."""
     if not path.exists():
         return dict(FRESH_STATE)
-    with open(path, encoding="utf-8") as f:
-        return json.load(f)
+    try:
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)
+    except (json.JSONDecodeError, OSError) as e:
+        import sys
+        print(f"[checkpoint] WARNING: {path} is corrupted ({e}). Starting fresh.", file=sys.stderr)
+        return dict(FRESH_STATE)
 
 
 def write_checkpoint(path: Path, state: Dict) -> None:
-    """Write checkpoint with current UTC timestamp."""
+    """Write checkpoint atomically with current UTC timestamp."""
     state = dict(state)
     state["last_updated"] = datetime.now(timezone.utc).isoformat()
     path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
+    tmp = path.with_suffix(".tmp")
+    with open(tmp, "w", encoding="utf-8") as f:
         json.dump(state, f, ensure_ascii=False, indent=2)
+    tmp.replace(path)
 
 
 def route_next_action(checkpoint: Dict) -> str:
@@ -122,12 +129,13 @@ def advance_article_iter(
 
 
 def trigger_material_fallback(checkpoint: Dict) -> Dict:
-    """Backtrack to material PDCA. Resets article_iter."""
+    """Backtrack to material PDCA. Resets article_iter and material_iter."""
     cp = dict(checkpoint)
     cp["phase"] = "material_pdca"
     cp["next_action"] = "run_material_iter"
     cp["material_fallback_count"] += 1
     cp["article_iter"] = 0
+    cp["material_iter"] = 0
     return cp
 
 

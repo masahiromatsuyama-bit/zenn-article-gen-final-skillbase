@@ -130,7 +130,7 @@
 #### FR-12: MATERIAL_FALLBACKトリガー
 - 記事PDCAイテレーション3回終了時点で記事スコアが0.70未満の場合、素材PDCAフェーズへバックトラックする
 - バックトラック後は素材PDCAを最大3イテレーション追加実行する（合計上限は元の5イテレーション制約とは独立）
-- バックトラックは1ランにつき最大1回まで
+- バックトラックは1ランにつき最大2回まで
 
 ### 2.2 廃止FR＋理由
 
@@ -205,7 +205,7 @@
 - **担当スクリプト**: `checkpoint.py`（新設、決定論的Pythonスクリプト）
 - **ファイル**: `checkpoint.json`（ランごとにリセット）
 - **`next_action` フィールド**: セッション再開時に次に実行すべきアクションを特定するためのフィールド
-  - 取りうる値: `"trend_research"`, `"pain_extract"`, `"thesis_design"`, `"material_pdca"`, `"article_pdca"`, `"consolidate"`, `"finalize"`, `"done"`
+  - 取りうる値: `"run_strategist"`, `"run_eval_designer"`, `"run_material_iter"`, `"material_fallback"`, `"run_article_iter"`, `"finalize"`, `"done"`
 - **保存タイミング**: 各フェーズ完了直後に `checkpoint.json` を更新する
 - **復元フロー**: セッション再開時に `checkpoint.json` を読み込み、`next_action` の値からフェーズを再開する
 - **状態保持対象**: 現在のイテレーション番号、現在のスコア、レビュー履歴の件数
