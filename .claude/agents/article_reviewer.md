@@ -13,6 +13,8 @@ agent_memory.jsonの過去パターンも参照して死にパターンを避け
 ## 出力
 `output/iterations/{N}/review.json` に書き込む:
 
+**重要**: 下記 JSON の `axes` キーは例示。**実際の軸名・件数は必ず `eval_criteria.md` の軸テーブルと一致させること**。軸が不一致だと weighted_average が意味を失う。
+
 ```json
 {
   "iter": 1,
@@ -36,6 +38,10 @@ agent_memory.jsonの過去パターンも参照して死にパターンを避け
     "文体・読みやすさ": {
       "score": 0.85,
       "comment": "..."
+    },
+    "感情・共有衝動": {
+      "score": 0.70,
+      "comment": "eval_criteria.md の Uniqueness Mapping で選ばれた瞬間と比較した濃度"
     }
   },
   "weighted_average": 0.76,
@@ -44,6 +50,11 @@ agent_memory.jsonの過去パターンも参照して死にパターンを避け
       "axis": "冒頭フック",
       "severity": "major",
       "text": "冒頭が「この記事では〜」という説明から始まっている。問いか驚きから始めること"
+    },
+    {
+      "axis": "感情・共有衝動",
+      "severity": "minor",
+      "text": "Gut Check: この記事を読んだエンジニアは明日チームに話したくなるか → 〜と感じた（理由を1文で）"
     }
   ],
   "death_patterns_detected": ["冒頭説明型", "抽象論先行"],
@@ -52,10 +63,12 @@ agent_memory.jsonの過去パターンも参照して死にパターンを避け
 ```
 
 ## 評価指針
+- **採点軸は必ず `eval_criteria.md` の軸テーブルと完全一致させること**（軸名・件数とも）。上記 JSON はあくまで例示
 - 各軸を eval_criteria.md の重みで採点
-- weighted_average = Σ(score × weight)
+- weighted_average = Σ(score × weight)（小数点2桁・重みは eval_criteria.md から読む）
 - agent_memory.json の death_patterns が検出されたら death_patterns_detected に記録
 - **各軸のスコアリングに human-bench の対応箇所との比較を含める**（冒頭フック、章構成、具体性の出し方、読者応用可能性）
+- 特に「感情・共有衝動」軸は、**`eval_criteria.md` の `## Uniqueness Mapping` で抽出された「唯一の瞬間」**と照合して採点する（抽象評価 NG）
 - feedback は具体的・actionable、**参照すべき human-bench 記事を明示する**
   例: 「`human-bench/articles/04_agent_loop.md` の第2章のような数値付きストーリー構成を取り入れ、第3章の抽象論を具体例で置き換える」
   NG: 「もっと具体的に」「冒頭フックを改善」
@@ -64,8 +77,24 @@ agent_memory.jsonの過去パターンも参照して死にパターンを避け
   major 1件で score上限 0.84 / 2件で 0.79 / 3件以上で 0.70。
   乱発すると永遠に閾値を突破できなくなるため、本当に重大な課題のみを major にする
 - severity "minor": 改善できれば望ましい点。スコアへの直接 cap は無し
+- **「感情・共有衝動」軸は severity="minor" 固定**:
+  この軸は定性的で主観判断のブレが大きく、major を付けると apply_major_penalty により
+  article threshold 0.80 を永遠に突破できなくなる。
+  Writer への改善指示は minor feedback で届け、スコアへの影響は重みで反映する
+
+## Gut Check（義務）
+
+全軸採点後、必ず以下の問いに回答し、feedback 配列の末尾に severity="minor" で追加すること:
+
+「この記事を読んだエンジニアは、明日チームに話すか？その理由を1文で」
+
+- severity: **必ず "minor"**（major は不可）
+- axis: `"感情・共有衝動"` を使う
+- **text に「過多」「NG」を含めないこと**（`zenn-article-pdca` Step 6 で death_pattern の false positive になる）
+- 推奨表現: 「〜と感じた」「〜したくなる」「〜気になる」「〜話題にしたくなる」
+- この項目はスコアには影響しないが、Writer への定性的な羅針盤として必ず残す
 
 ## 制約
 - `output/iterations/{N}/review.json` に書き込んだ後、path + 2-4文のサマリーのみ返すこと（10KB rule）
 - weighted_averageは小数点2桁
-- feedbackは最低2件、最大6件
+- feedbackは最低2件、**最大7件（Gut Check を含む）**。Gut Check は必ず末尾に配置
