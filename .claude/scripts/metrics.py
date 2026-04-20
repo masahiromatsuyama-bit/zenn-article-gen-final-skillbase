@@ -34,7 +34,11 @@ DEFAULT_HARD_FAIL = {
     "consecutive_length_cap": 0.50,
 }
 
-_DESU_MASU_RE = re.compile(r"(です|ます|でした|ました|ません|でしょう)[。？！\?\!]?\s*$")
+_DESU_MASU_RE = re.compile(
+    r"(です|ます|でした|ました|ません|でしょう|でしょうか)"
+    r"[^。！？\!\?]*"
+    r"[。！？\!\?]?\s*$"
+)
 
 
 def compute_article_metrics(article_text: str) -> ArticleMetrics:
@@ -64,16 +68,26 @@ def compute_article_metrics(article_text: str) -> ArticleMetrics:
 
 
 def _extract_sentences(text: str) -> list[str]:
-    """Split text into sentences, excluding code blocks/headings/quotes."""
+    """Split text into sentences, excluding code blocks/headings/quotes/frontmatter/tables."""
     lines = text.split("\n")
     in_code = False
+    in_frontmatter = False
     sentences: list[str] = []
-    for line in lines:
+    for i, line in enumerate(lines):
         stripped = line.strip()
+        # YAML frontmatter: only when "---" is the very first line
+        if i == 0 and stripped == "---":
+            in_frontmatter = True
+            continue
+        if in_frontmatter:
+            if stripped == "---":
+                in_frontmatter = False
+            continue
         if stripped.startswith("```"):
             in_code = not in_code
             continue
-        if in_code or stripped.startswith("#") or not stripped or stripped.startswith(">"):
+        if (in_code or stripped.startswith("#") or not stripped
+                or stripped.startswith(">") or stripped.startswith("|")):
             continue
         parts = re.split(r"(?<=[。！？\!\?])", stripped)
         for p in parts:
@@ -246,6 +260,15 @@ def fix_consecutive_length(article_text: str, max_consecutive: int = 4) -> str:
     return "\n".join(result_lines)
 
 
+def _representative_sentence_length(line_str: str) -> int:
+    """Return the length of the first sentence in a line (for run-length comparison)."""
+    parts = re.split(r"(?<=[。！？\!\?])", line_str.strip())
+    sentences = [p.strip() for p in parts if p.strip()]
+    if not sentences:
+        return len(line_str.strip())
+    return len(sentences[0])
+
+
 def _merge_adjacent_lines(lines: list[str]) -> list[str]:
     in_code = False
     content_indices: list[int] = []
@@ -259,7 +282,7 @@ def _merge_adjacent_lines(lines: list[str]) -> list[str]:
         content_indices.append(i)
     if len(content_indices) < 5:
         return lines
-    lengths = [(idx, len(lines[idx].strip())) for idx in content_indices]
+    lengths = [(idx, _representative_sentence_length(lines[idx])) for idx in content_indices]
     result = list(lines)
     merged: set[int] = set()
     run_start = 0

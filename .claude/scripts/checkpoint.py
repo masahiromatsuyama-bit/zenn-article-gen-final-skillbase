@@ -152,9 +152,11 @@ def advance_article_iter(
     return cp
 
 
-def advance_after_consolidate(checkpoint: Dict) -> Dict:
-    """After Consolidator re-review, always proceed to finalize."""
+def advance_after_consolidate(checkpoint: Dict, final_score: float) -> Dict:
+    """After Consolidator re-review, update best score and proceed to finalize."""
     cp = dict(checkpoint)
+    if final_score > cp["best_article_score"]:
+        cp["best_article_score"] = final_score
     cp["next_action"] = "finalize"
     return cp
 

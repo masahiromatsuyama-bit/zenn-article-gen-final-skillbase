@@ -101,20 +101,52 @@ write_checkpoint(checkpoint_path, cp)
 ### consolidate ステージの処理
 
 ```python
+import json
+from metrics import (
+    compute_article_metrics, check_hard_fail,
+    fix_desu_masu, fix_consecutive_length, fix_code_ratio,
+    apply_hard_fail, apply_major_penalty,
+)
+from checkpoint import advance_after_consolidate, write_checkpoint
+
 # 1. Consolidator agent を spawn
 #    入力: iterations/1..N/article.md, iterations/1..N/review.json, eval_criteria.md, style_memory/style_guide.md
 #    出力: iterations/{N}/article.md（統合版で上書き）
 #    ※ N = best_article_iter（完了時点で最高スコアを出した iter）
+N = cp["best_article_iter"]
+consolidated_path = f"output/iterations/{N}/article.md"
 
-# 2. 統合後の記事を ArticleReviewer で再採点
-#    入力: iterations/{N}/article.md（統合版）, eval_criteria.md
+# 2. HARD FAIL チェック → 修正（zenn-article-pdca Step 2 と同じフロー）
+#    ArticleReviewer を呼ぶ前に修正済み記事にしておく
+article_text = open(consolidated_path, encoding="utf-8").read()
+metrics = compute_article_metrics(article_text)
+hf = check_hard_fail(metrics)
+if hf.applied:
+    reasons_str = " ".join(hf.reasons)
+    if "code_ratio" in reasons_str:
+        article_text = fix_code_ratio(article_text)
+    if "desu_masu_ratio" in reasons_str:
+        article_text = fix_desu_masu(article_text)
+    if "consecutive_same_length" in reasons_str:
+        article_text = fix_consecutive_length(article_text)
+    with open(consolidated_path, "w", encoding="utf-8") as fh:
+        fh.write(article_text)
+    hf = check_hard_fail(compute_article_metrics(article_text))
+
+# 3. 統合後（修正済み）記事を ArticleReviewer で再採点
+#    入力: iterations/{N}/article.md（修正済み統合版）, eval_criteria.md
 #    出力: iterations/{N}/review.json（上書き）
 
-# 3. 再採点の結果で apply_hard_fail + apply_major_penalty を適用し final_score を確定
+# 4. スコア確定（apply_hard_fail + apply_major_penalty）
+with open(f"output/iterations/{N}/review.json", encoding="utf-8") as fh:
+    review = json.load(fh)
+raw_score = review["weighted_average"]
+after_hf = apply_hard_fail(raw_score, hf)
+major_count = sum(1 for fb in review["feedback"] if fb.get("severity") == "major")
+final_score = apply_major_penalty(after_hf, major_count)
 
-# 4. advance_after_consolidate で finalize へ
-from checkpoint import advance_after_consolidate, write_checkpoint
-cp = advance_after_consolidate(cp)
+# 5. advance_after_consolidate で finalize へ（final_score を渡して best_article_score を更新）
+cp = advance_after_consolidate(cp, final_score=final_score)
 write_checkpoint(checkpoint_path, cp)
 ```
 

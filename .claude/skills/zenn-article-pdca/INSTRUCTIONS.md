@@ -164,16 +164,32 @@ final_score = apply_major_penalty(after_hf, major_count)
 ### Step 6: agent_memory.json 更新
 
 ```python
-import json
+import json, os
+
+# 新規 death_patterns を feedback の text フィールドから抽出
+new_death_patterns = [
+    f["text"] for f in review["feedback"]
+    if "過多" in f.get("text", "") or "NG" in f.get("text", "")
+]
+
+# 既存 memory.json があればマージ（death_patterns はリストに追記・重複除去）
+existing_death_patterns: list[str] = []
+memory_path = "agent_memory/memory.json"
+if os.path.exists(memory_path):
+    with open(memory_path, encoding="utf-8") as fh:
+        prev = json.load(fh)
+    existing_death_patterns = prev.get("death_patterns", [])
+
+merged_death_patterns = list(dict.fromkeys(existing_death_patterns + new_death_patterns))
 
 memory = {
     "score_by_axis": review["axes"],
-    "death_patterns": [f for f in review["feedback"] if "過多" in f or "NG" in f]
+    "death_patterns": merged_death_patterns,
 }
-json.dump(memory, open("agent_memory/memory.json", "w"), ensure_ascii=False, indent=2)
+os.makedirs("agent_memory", exist_ok=True)
+with open(memory_path, "w", encoding="utf-8") as fh:
+    json.dump(memory, fh, ensure_ascii=False, indent=2)
 ```
-
-既存の `memory.json` が存在する場合はマージ（`death_patterns` はリストに追記、重複除去）する。
 
 ---
 
