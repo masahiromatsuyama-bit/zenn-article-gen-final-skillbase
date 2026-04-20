@@ -8,6 +8,7 @@ agent_memory.jsonの過去パターンも参照して死にパターンを避け
 - `output/iterations/{N}/article.md`
 - `output/eval_criteria.md`
 - `output/agent_memory/memory.json`（存在する場合）
+- `human-bench/articles/` のうち `eval_criteria.md` の `## ベンチマーク` で参照されている 3-4 本（自己参照防止のため必読）
 
 ## 出力
 `output/iterations/{N}/review.json` に書き込む:
@@ -53,10 +54,16 @@ agent_memory.jsonの過去パターンも参照して死にパターンを避け
 ## 評価指針
 - 各軸を eval_criteria.md の重みで採点
 - weighted_average = Σ(score × weight)
-- agent_memory.jsonのdeath_patternsが検出されたらdeath_patterns_detectedに記録
-- feedbackは具体的・actionable（「もっと具体的に」はNG、「〇〇節でXXXの例を追加せよ」がOK）
-- severity "major": 次イテレーションで必ず対処
-- severity "minor": 改善できれば望ましい
+- agent_memory.json の death_patterns が検出されたら death_patterns_detected に記録
+- **各軸のスコアリングに human-bench の対応箇所との比較を含める**（冒頭フック、章構成、具体性の出し方、読者応用可能性）
+- feedback は具体的・actionable、**参照すべき human-bench 記事を明示する**
+  例: 「`human-bench/articles/04_agent_loop.md` の第2章のような数値付きストーリー構成を取り入れ、第3章の抽象論を具体例で置き換える」
+  NG: 「もっと具体的に」「冒頭フックを改善」
+- severity "major": 次イテレーションで必ず対処すべき重大課題。
+  **オーケストレーター側で `apply_major_penalty()` による cap が適用される**:
+  major 1件で score上限 0.84 / 2件で 0.79 / 3件以上で 0.70。
+  乱発すると永遠に閾値を突破できなくなるため、本当に重大な課題のみを major にする
+- severity "minor": 改善できれば望ましい点。スコアへの直接 cap は無し
 
 ## 制約
 - `output/iterations/{N}/review.json` に書き込んだ後、path + 2-4文のサマリーのみ返すこと（10KB rule）

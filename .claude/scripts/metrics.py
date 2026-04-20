@@ -137,6 +137,24 @@ def apply_hard_fail(review_score: float, hard_fail: HardFailResult) -> float:
     return min(review_score, hard_fail.cap)
 
 
+def apply_major_penalty(score: float, major_count: int) -> float:
+    """Cap score based on number of unresolved major feedback items.
+
+    Aligned with the downstream thresholds in checkpoint.py:
+      - 3+ major: cap to 0.70 (triggers MATERIAL_FALLBACK if article_iter >= 3)
+      - 2 major:  cap to 0.79 (below article threshold 0.80)
+      - 1 major:  cap to 0.84 (below material threshold 0.85)
+      - 0 major:  no change
+    """
+    if major_count >= 3:
+        return min(score, 0.70)
+    if major_count >= 2:
+        return min(score, 0.79)
+    if major_count >= 1:
+        return min(score, 0.84)
+    return score
+
+
 _DA_ENDINGS = [
     (re.compile(r"ものだ([。]?\s*)$"), r"ものです\1"),
     (re.compile(r"ことだ([。]?\s*)$"), r"ことです\1"),
@@ -174,6 +192,45 @@ def _apply_da_fixes(lines: list[str]) -> list[str]:
         for pattern, replacement in _DA_ENDINGS:
             modified = pattern.sub(replacement, modified)
         result.append(modified)
+    return result
+
+
+def fix_code_ratio(article_text: str, target_ratio: float = 0.18) -> str:
+    """Reduce code_ratio by removing blank lines and comment-only lines inside
+    fenced code blocks. Never removes substantive code (identifier/keyword lines).
+
+    Safe operations only:
+      - Drop empty lines inside ``` ... ``` blocks
+      - Drop lines whose only non-whitespace content starts with
+        '#' (Python/shell) or '//' (JS/TS/Go/Rust/C)
+
+    Iterates up to 3 times; returns early once code_ratio <= target_ratio.
+    """
+    result_lines = article_text.split("\n")
+    for _ in range(3):
+        text = "\n".join(result_lines)
+        m = compute_article_metrics(text)
+        if m.code_ratio <= target_ratio:
+            break
+        result_lines = _strip_code_noise(result_lines)
+    return "\n".join(result_lines)
+
+
+def _strip_code_noise(lines: list[str]) -> list[str]:
+    in_code = False
+    result: list[str] = []
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith("```"):
+            in_code = not in_code
+            result.append(line)
+            continue
+        if in_code:
+            if not stripped:
+                continue
+            if stripped.startswith("#") or stripped.startswith("//"):
+                continue
+        result.append(line)
     return result
 
 

@@ -13,8 +13,18 @@
 | `iter` | 現在のイテレーション番号（1〜5） |
 | `strategy.md` | Layer 1 で生成された戦略 |
 | `eval_criteria.md` | Layer 1 で生成された評価基準 |
+| `knowledge/system_analysis.md` | SystemAnalyst の出力（`requires_system_analysis=true` の場合のみ存在） |
 | `material_reviews/{iter-1}/review.json` | 前回レビュー（iter > 1 の場合のみ） |
 | `fb_log.json` | 過去フィードバック履歴 |
+
+## パス定数
+
+```python
+FB_LOG_PATH = "output/fb_log.json"
+SYSTEM_ANALYSIS_PATH = "output/knowledge/system_analysis.md"  # 存在しない場合あり
+THESIS_PATH = "output/thesis.md"
+MATERIAL_THRESHOLD = 0.85  # gap_alert 判定に使用
+```
 
 ---
 
@@ -38,69 +48,152 @@ TrendResearcher と PainExtractor は互いに独立しているため、同時 
 
 **Step 2: ThesisDesigner を spawn**
 
-- 入力: `knowledge/trends.md`, `knowledge/reader_pains.md`
+- 入力: `strategy.md`, `knowledge/trends.md`, `knowledge/reader_pains.md`, `knowledge/system_analysis.md`（存在する場合のみ）
 - 出力: `thesis.md`
 - 返却: ファイルパス + 2〜4文サマリー
 
 **Step 3: MaterialReviewer を spawn**
 
-- 入力: `thesis.md`, `eval_criteria.md`
+- 入力: `thesis.md`, `eval_criteria.md`, `human-bench/articles/`（eval_criteria.md の ## ベンチマーク で参照されている3-4本）
 - 出力: `material_reviews/1/review.json`
   ```json
   {
-    "axes": {"軸名": スコア, ...},
+    "axes": {"軸名": {"score": 0.xx, "comment": "..."}, ...},
     "weighted_average": 0.xx,
-    "feedback": ["..."]
+    "feedback": [{"axis": "...", "severity": "major|minor", "text": "..."}]
   }
   ```
 - 返却: ファイルパス + 2〜4文サマリー
+
+**Step 4: fb_log 更新**（iter == 1 でも実行）
+
+下記 iter >= 2 の Step 5 と同じ処理を行う。
 
 ---
 
 ### iter >= 2 の場合
 
-**Step 1: 前回レビューを読み込む**
+**Step 1: 前回レビュー読み込み + 前回 thesis のアーカイブ**
 
-`material_reviews/{iter-1}/review.json` を読み込み、`feedback` フィールドを取得する。
+```python
+import os, shutil, json
+
+# 前回レビューを読む（フィードバック反映用）
+with open(f"output/material_reviews/{iter-1}/review.json") as f:
+    prev_review = json.load(f)
+prev_feedback = prev_review["feedback"]
+
+# 前回の thesis.md を thesis_history/ に退避（上書き前のスナップショット）
+os.makedirs("output/thesis_history", exist_ok=True)
+if os.path.exists(THESIS_PATH):
+    shutil.copy2(THESIS_PATH, f"output/thesis_history/{iter-1}.md")
+```
 
 **Step 2: gap_alert チェック**
 
 ```python
+import os, json
 from stagnation_check import should_trigger_gap_alert
 from gap_alert import format_gap_alert
 from fb_log import load_fb_log
 
-fb_log = load_fb_log()
-alert = should_trigger_gap_alert(fb_log, phase="material")
-gap_alert_text = format_gap_alert(alert) if alert else None
+# (1) material_reviews/ からスコア履歴を構築
+score_history = []
+for i in range(1, iter):
+    p = f"output/material_reviews/{i}/review.json"
+    if os.path.exists(p):
+        with open(p) as f:
+            r = json.load(f)
+            score_history.append({"score": r["weighted_average"]})
+
+# (2) 停滞判定（material 閾値 = 0.85）
+gap_alert_text = None
+if should_trigger_gap_alert(score_history, MATERIAL_THRESHOLD):
+    # (3) feedback_history は fb_log の material phase エントリから構築
+    fb_entries = load_fb_log(FB_LOG_PATH)
+    feedback_history = [
+        {"description": e.description}
+        for e in fb_entries if e.phase == "material"
+    ]
+    current_score = score_history[-1]["score"]
+    gap_alert_text = format_gap_alert(current_score, MATERIAL_THRESHOLD, feedback_history)
 ```
 
 **Step 3: ThesisDesigner を spawn**
 
-- 入力: 前回 `thesis.md`, 前回レビューの `feedback`, gap_alert（存在する場合はプロンプトに含める）
+- 入力:
+  - `strategy.md`
+  - `knowledge/trends.md`, `knowledge/reader_pains.md`
+  - `knowledge/system_analysis.md`（存在する場合のみ）
+  - `thesis_history/{iter-1}.md`（前回 thesis スナップショット）
+  - 前回レビューの `feedback`（Step 1 で取得済み）
+  - `gap_alert_text`（存在する場合はプロンプトに埋め込む）
 - 出力: `thesis.md`（上書き）
 - 返却: ファイルパス + 2〜4文サマリー
 
 **Step 4: MaterialReviewer を spawn**
 
-- 入力: 更新された `thesis.md`, `eval_criteria.md`
+- 入力: 更新された `thesis.md`, `eval_criteria.md`, `human-bench/articles/`（同上）
 - 出力: `material_reviews/{iter}/review.json`
 - 返却: ファイルパス + 2〜4文サマリー
 
+**Step 5: fb_log 更新**
+
+```python
+from fb_log import load_fb_log, record_fb, append_fb_diff
+import json
+
+# (1) 前回エントリを読む（初回は空）
+prev_entries = load_fb_log(FB_LOG_PATH)
+
+# (2) review.json の feedback を FBEntry に変換
+with open(f"output/material_reviews/{iter}/review.json") as f:
+    review = json.load(f)
+new_entries = record_fb(
+    entries=prev_entries,
+    new_feedbacks=review["feedback"],   # [{axis, severity, text}, ...]
+    iteration=iter,
+    phase="material",
+)
+
+# (3) diff を計算して fb_log に追記
+diff = append_fb_diff(
+    path=FB_LOG_PATH,
+    entries=new_entries,
+    prev_entries=prev_entries,
+    iteration=iter,
+    phase="material",
+)
+```
+
 ---
+
+## スコア計算
+
+```python
+from metrics import apply_major_penalty
+
+raw_score = review["weighted_average"]
+major_count = sum(1 for f in review["feedback"] if f.get("severity") == "major")
+final_score = apply_major_penalty(raw_score, major_count)
+# major_count >= 1: score は 0.84 を超えない → material threshold 0.85 を突破できない
+# これにより major feedback が残っているうちは必ず次イテに進む
+```
 
 ## 返り値フォーマット
 
 ```json
 {
   "score": 0.xx,
-  "feedback": ["...", "..."],
+  "raw_score": 0.xx,
+  "major_count": N,
+  "feedback": [{"axis":"...","severity":"...","text":"..."}, ...],
   "iter": N,
   "output_path": "material_reviews/N/review.json"
 }
 ```
 
-`score` は `review.json` の `weighted_average` をそのまま使用する。
+`score` は `apply_major_penalty(raw_score, major_count)` の結果を使う。
 
 ---
 

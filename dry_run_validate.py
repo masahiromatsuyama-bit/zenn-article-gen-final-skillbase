@@ -127,9 +127,14 @@ if cp_mod:
         check("article iter 3 (fallback_count=2 → no more fallback) → run_article_iter",
               cp["next_action"] == "run_article_iter")
 
-        # Article: score >= threshold → finalize
+        # Article: score >= threshold AT iter >= 3 → consolidate (FIX-6)
         cp = cp_mod.advance_article_iter(cp, score=0.82)
-        check("article score >= 0.80 → finalize",
+        check("article score >= 0.80 at iter >= 3 → consolidate (FIX-6)",
+              cp["next_action"] == "consolidate")
+
+        # consolidate → finalize (FIX-6)
+        cp = cp_mod.advance_after_consolidate(cp)
+        check("advance_after_consolidate → finalize (FIX-6)",
               cp["next_action"] == "finalize")
 
         # Mark done
@@ -153,8 +158,8 @@ if cp_mod:
               cp_reset["phase"] == "article_pdca" and cp_reset["material_iter"] == 5)
         for _ in range(10):
             cp_reset = cp_mod.advance_article_iter(cp_reset, score=0.70, fallback_max=0)
-        check("article max iter (10) → finalize",
-              cp_reset["next_action"] == "finalize" and cp_reset["article_iter"] == 10)
+        check("article max iter (10) → consolidate (FIX-6)",
+              cp_reset["next_action"] == "consolidate" and cp_reset["article_iter"] == 10)
 
 # ─────────────────────────────────────────────
 print("\n[3] metrics.py — HARD FAIL caps")
@@ -266,6 +271,113 @@ if stag_mod and gap_mod:
     check("format_gap_alert returns non-empty string with GAP ALERT",
           "GAP ALERT" in alert and "0.72" in alert,
           alert.split("\n")[0])
+
+# ─────────────────────────────────────────────
+print("\n[5b] Phase 1 FIX verification (FIX-1..6)")
+# ─────────────────────────────────────────────
+
+# T1: fix_code_ratio
+if met_mod:
+    dense_lines = ["普通の文章です。" for _ in range(6)] + ["```python"]
+    dense_lines += ["# a comment line"] * 5
+    dense_lines += [""] * 5
+    dense_lines += ["x = 1"] * 20
+    dense_lines += ["```"]
+    dense = "\n".join(dense_lines)
+    before_m = met_mod.compute_article_metrics(dense)
+    fixed = met_mod.fix_code_ratio(dense, target_ratio=0.50)
+    after_m = met_mod.compute_article_metrics(fixed)
+    check("FIX-1 fix_code_ratio: ratio decreased after strip",
+          after_m.code_ratio < before_m.code_ratio,
+          f"before={before_m.code_ratio:.2f} after={after_m.code_ratio:.2f}")
+    check("FIX-1 fix_code_ratio: no substantive code lost",
+          fixed.count("x = 1") == 20)
+
+# T2: apply_major_penalty
+if met_mod:
+    check("FIX-2 apply_major_penalty: major=0 passthrough",
+          met_mod.apply_major_penalty(0.90, 0) == 0.90)
+    check("FIX-2 apply_major_penalty: major=1 cap to 0.84",
+          met_mod.apply_major_penalty(0.90, 1) == 0.84)
+    check("FIX-2 apply_major_penalty: major=2 cap to 0.79",
+          met_mod.apply_major_penalty(0.86, 2) == 0.79)
+    check("FIX-2 apply_major_penalty: major=3 cap to 0.70",
+          met_mod.apply_major_penalty(0.95, 3) == 0.70)
+    check("FIX-2 apply_major_penalty: below cap not raised",
+          met_mod.apply_major_penalty(0.50, 2) == 0.50)
+
+# T3: fb_log duplicate stagnation removed
+if fb_mod:
+    check("FIX-3 check_fb_stagnation removed",
+          not hasattr(fb_mod, "check_fb_stagnation"))
+    check("FIX-3 StagnationResult removed",
+          not hasattr(fb_mod, "StagnationResult"))
+
+# T4: trigger_material_fallback resets best_article
+if cp_mod:
+    cp_fb = dict(cp_mod.FRESH_STATE)
+    cp_fb.update({
+        "phase": "article_pdca", "article_iter": 3,
+        "best_article_iter": 2, "best_article_score": 0.75,
+    })
+    cp_after = cp_mod.trigger_material_fallback(cp_fb)
+    check("FIX-4 fallback resets best_article_iter to None",
+          cp_after["best_article_iter"] is None)
+    check("FIX-4 fallback resets best_article_score to 0.0",
+          cp_after["best_article_score"] == 0.0)
+    check("FIX-4 fallback preserves material_fallback_count increment",
+          cp_after["material_fallback_count"] == 1)
+
+# T5, T6: advance_layer1 with requires_system_analysis
+if cp_mod:
+    cp_sa = dict(cp_mod.FRESH_STATE)
+    cp_sa["next_action"] = "run_eval_designer"
+    # requires=False → material
+    cp_no_sa = cp_mod.advance_layer1(cp_sa, "eval_designer",
+                                     requires_system_analysis=False)
+    check("FIX-5 eval_designer (requires=False) → material_pdca/run_material_iter",
+          cp_no_sa["phase"] == "material_pdca"
+          and cp_no_sa["next_action"] == "run_material_iter")
+    # requires=True → system_analyst
+    cp_with_sa = cp_mod.advance_layer1(cp_sa, "eval_designer",
+                                       requires_system_analysis=True)
+    check("FIX-5 eval_designer (requires=True) → layer1/run_system_analyst",
+          cp_with_sa["phase"] == "layer1"
+          and cp_with_sa["next_action"] == "run_system_analyst")
+    # system_analyst → material
+    cp_after_sa = cp_mod.advance_layer1(cp_with_sa, "system_analyst")
+    check("FIX-5 system_analyst done → material_pdca/run_material_iter",
+          cp_after_sa["phase"] == "material_pdca"
+          and cp_after_sa["next_action"] == "run_material_iter")
+    # VALID_TRANSITIONS check
+    check("FIX-5 VALID_TRANSITIONS[layer1] includes run_system_analyst",
+          "run_system_analyst" in cp_mod.VALID_TRANSITIONS["layer1"])
+
+# T7, T8: consolidate routing
+if cp_mod:
+    # iter 1 threshold pass → finalize (skip consolidator)
+    cp_early = dict(cp_mod.FRESH_STATE)
+    cp_early.update({"phase": "article_pdca", "article_iter": 0})
+    cp_e1 = cp_mod.advance_article_iter(cp_early, score=0.82)
+    check("FIX-6 iter 1 threshold pass → finalize (skip consolidate)",
+          cp_e1["next_action"] == "finalize" and cp_e1["article_iter"] == 1)
+
+    # iter 3 threshold pass → consolidate
+    cp_mid = dict(cp_mod.FRESH_STATE)
+    cp_mid.update({"phase": "article_pdca", "article_iter": 2,
+                   "best_article_score": 0.70, "best_article_iter": 1})
+    cp_m3 = cp_mod.advance_article_iter(cp_mid, score=0.83)
+    check("FIX-6 iter 3 threshold pass → consolidate",
+          cp_m3["next_action"] == "consolidate" and cp_m3["article_iter"] == 3)
+
+    # advance_after_consolidate exists
+    cp_post = cp_mod.advance_after_consolidate(cp_m3)
+    check("FIX-6 advance_after_consolidate → finalize",
+          cp_post["next_action"] == "finalize")
+
+    # VALID_TRANSITIONS check
+    check("FIX-6 VALID_TRANSITIONS[article_pdca] includes consolidate",
+          "consolidate" in cp_mod.VALID_TRANSITIONS["article_pdca"])
 
 # ─────────────────────────────────────────────
 print("\n[6] Spawn plan walkthrough (no actual agents)")

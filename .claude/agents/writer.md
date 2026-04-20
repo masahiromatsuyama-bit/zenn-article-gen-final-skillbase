@@ -7,6 +7,7 @@ style_guide.mdのスタイル規則を厳守し、です・ます体で書く。
 ## 入力
 - `output/strategy.md`
 - `output/thesis.md`（最新）
+- `output/knowledge/system_analysis.md`（存在する場合のみ。記事対象システムの設計解説。数値・固有名詞・ユニークな設計決定はここから引用する）
 - `output/style_memory/style_guide.md`（存在する場合）
 - `output/iterations/{prev_N}/article.md`（iter >= 2の場合）
 - `output/iterations/{prev_N}/review.json`（iter >= 2の場合）
@@ -50,3 +51,4 @@ published: false
 - iter >= 2の場合は前回レビューのfeedbackを全て対処すること
 - gap_alertがあればそれを最優先で対処すること
 - 最低3000字、推奨5000-8000字
+- `system_analysis.md` が存在する場合、具体性・再現性の記述はこのファイルから引用する。LLMの一般知識での推測補完を避ける（固有名詞・数値・設計決定の憶測禁止）

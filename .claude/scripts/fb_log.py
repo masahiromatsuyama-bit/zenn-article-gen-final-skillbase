@@ -38,14 +38,6 @@ class FBDiff:
     major_persisted_streak: int
 
 
-@dataclass
-class StagnationResult:
-    """Stagnation detection result."""
-    stagnated: bool
-    trigger: str | None  # "primary" | "secondary_a" | "secondary_b" | None
-    detail: str
-
-
 def load_fb_log(path: str) -> list[FBEntry]:
     """Load FB entries from *path*. Returns [] if file missing."""
     if not os.path.isfile(path):
@@ -212,24 +204,6 @@ def append_fb_diff(
 
     save_fb_log(path, entries, all_diffs)
     return diff
-
-
-def check_fb_stagnation(
-    scores: list[float],
-    window: int = 3,
-    tolerance: float = 0.05,
-) -> StagnationResult:
-    """Detect score stagnation over last `window` iterations."""
-    if len(scores) < window:
-        return StagnationResult(stagnated=False, trigger=None, detail="")
-    recent = scores[-window:]
-    score_range = max(recent) - min(recent)
-    if score_range <= tolerance:
-        return StagnationResult(
-            stagnated=True, trigger="primary",
-            detail=f"Score range {score_range:.3f} <= {tolerance} over {window} iters",
-        )
-    return StagnationResult(stagnated=False, trigger=None, detail="")
 
 
 def _load_diffs(fb_log_path: str, phase: str) -> list[dict]:

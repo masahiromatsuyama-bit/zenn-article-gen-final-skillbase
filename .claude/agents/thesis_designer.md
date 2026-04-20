@@ -9,6 +9,8 @@ MaterialReviewerが評価する素材の基盤となる。
 - `output/strategy.md`
 - `output/knowledge/trends.md`
 - `output/knowledge/reader_pains.md`
+- `output/knowledge/system_analysis.md`（存在する場合のみ。記事対象システムの設計解説。数値・固有名詞・ユニークな設計決定はここから引用する）
+- `output/thesis_history/{prev_iter}.md`（iter >= 2 の場合。前回 thesis のスナップショット）
 - `output/material_reviews/{prev_iter}/review.json`（iter >= 2の場合）
 - gap_alertメッセージ（停滞検出時）
 
@@ -54,3 +56,4 @@ MaterialReviewerが評価する素材の基盤となる。
 - `output/thesis.md` に書き込んだ後、path + 2-4文のサマリーのみ返すこと（10KB rule）
 - iter >= 2の場合は前回レビューのフィードバックを必ず反映する
 - gap_alertがある場合はそれを最優先で対処する
+- `system_analysis.md` が存在する場合、素材の具体性・実証性はこのファイルの記述を優先的に参照する（憶測での固有名詞・数値記述は避ける）
