@@ -1003,4 +1003,201 @@ route_next_action() で次のアクションを取得する。
 
 ---
 
+## 8. Phase 4 既知バグ詳細（2026-04-20 E2E実行で発見）
+
+> **発見日**: 2026-04-20  
+> **発見契機**: `fix/phase1-code-corrections` ブランチでのフルE2E実行（記事テーマ: システム自己紹介記事）  
+> **ステータス**: 全件未修正（Phase 4 修正対象）  
+> **対応REQUIREMENTS.md**: R-09〜R-16
+
+---
+
+### Bug-A1: `_extract_sentences()` がYAML frontmatterと区切り行を文として計上
+
+**場所**: `metrics.py` / `_extract_sentences()` 関数
+
+**症状**: desu_masu比率が実際の文章より低く計算される。  
+article.md 先頭の7行分YAML frontmatter（`---`、`title:`、`emoji:`等）と`---`区切り行が「文」としてカウントされ、分母が水増しされる。
+
+**実測値**:
+- E2Eで frontmatter 7行 + `---` 4行 ≒ 11文が余分にカウント
+- 本文desu_masu文が80/100文でも計算上は80/111 ≈ 0.72 となりHARDFAIL発動
+
+**現在のコード（問題箇所）**:
+```python
+def _extract_sentences(text: str) -> list[str]:
+    sentences = re.split(r'[。！？\n]+', text)  # 全行を一律分割
+    return [s.strip() for s in sentences if s.strip()]
+```
+
+**修正方針**:
+```python
+def _extract_sentences(text: str) -> list[str]:
+    # YAMLfrontmatter除去
+    text = re.sub(r'^---\n.*?\n---\n', '', text, flags=re.DOTALL)
+    # Markdownテーブル行除去（|で始まる行）
+    lines = [l for l in text.split('\n') if not l.strip().startswith('|')]
+    text = '\n'.join(lines)
+    sentences = re.split(r'[。！？]+', text)
+    return [s.strip() for s in sentences if len(s.strip()) > 2]
+```
+
+---
+
+### Bug-A2: `_DESU_MASU_RE` が取りこぼすです・ます終止パターン
+
+**場所**: `metrics.py` / `_DESU_MASU_RE` 正規表現
+
+**症状**: 以下のパターンがdesu_masu文としてカウントされない。
+
+| パターン | 例文 | 原因 |
+|---|---|---|
+| `でしょうか。` | 「なぜそうなるのでしょうか。」 | `か` が`[。？！]`の前に介在 |
+| `ます（補足）。` | 「確認できます（詳細は後述）。」 | `ます`の直後が`（`で句点でない |
+| 体言止め | 「これが核心。」 | そもそも対象外（仕様とも取れる） |
+| バッククォート後の句点 | `` `metrics.py` です。`` | バッククォートが終端に挟まる |
+
+**現在のパターン**:
+```python
+_DESU_MASU_RE = re.compile(
+    r'(です|ます|でした|ました|ません|でしょう)[。？！\?\!]?\s*$',
+    re.MULTILINE
+)
+```
+
+**修正方針**:
+```python
+_DESU_MASU_RE = re.compile(
+    r'(です|ます|でした|ました|ません|でしょう|でしょうか)'
+    r'[^。]*[。？！\?\!]',  # 終止符までの間に他文字を許容
+    re.MULTILINE
+)
+```
+
+---
+
+### Bug-A3: `fix_consecutive_length()` が句点境界の連続同長問題を解消できない
+
+**場所**: `metrics.py` / `fix_consecutive_length()` 関数
+
+**症状**: 関数を5回適用しても `consecutive_same_length` が変化しない。
+
+**根本原因**: 構造的ミスマッチ
+- `_extract_sentences()` は `。` で文を分割（1行に複数文が含まれる）
+- `fix_consecutive_length()` は改行（`\n`）で行を分割してマージ処理
+- → 同一行内の `。` 区切り連続文には一切効かない
+
+**実測**: E2E実行でConslidator後に `consecutive=9` が発生したが、`fix_consecutive_length()` では0改善。手動でターゲット文を直接編集することで解消した。
+
+**修正方針**: `fix_consecutive_length()` を廃止してWriterプロンプトで根本防止するアプローチが現実的。代替案として `_extract_sentences()` の結果を直接操作してマージするが、Markdownの文構造を壊すリスクがある。
+
+---
+
+### Bug-B1: `advance_after_consolidate()` がConsolidator後スコアを`best_article_score`に反映しない
+
+**場所**: `checkpoint.py` / `advance_after_consolidate()` 関数
+
+**症状**: `report.json` の `score` と `best_article_score` がConsolidator前の値のまま。
+
+**実測値**:
+- Consolidatorが再レビューで `0.82` を取得
+- `report.json` は `{"score": 0.80, "best_article_score": 0.80}` のまま
+
+**現在のコード（問題箇所）**:
+```python
+def advance_after_consolidate(state: dict) -> dict:
+    state["next_action"] = "finalize"
+    state["last_updated"] = _now()
+    return state  # best_article_score を更新していない
+```
+
+**修正方針**:
+```python
+def advance_after_consolidate(state: dict, consolidated_score: float) -> dict:
+    state["next_action"] = "finalize"
+    if consolidated_score > state.get("best_article_score", 0.0):
+        state["best_article_score"] = consolidated_score
+        state["best_article_iter"] = state.get("article_iter", 0)
+    state["last_updated"] = _now()
+    return state
+```
+
+---
+
+### Bug-C1: Article PDCA Step 6のdeath_patterns抽出でdict型に`in`演算子誤用
+
+**場所**: `zenn-article-pdca/INSTRUCTIONS.md` / Step 6 エージェントメモリ更新
+
+**症状**: `death_patterns` が常に空リストになり、エージェントメモリに死亡パターンが蓄積されない。
+
+**現在の指示**:
+```python
+death_patterns = [f for f in review["feedback"] if "過多" in f or "NG" in f]
+```
+
+**問題**: `review["feedback"]` の各要素 `f` は `{"axis": ..., "severity": ..., "text": ...}` のdictオブジェクト。dictへの `in` 演算子はキー名を検索するため、`"過多"` や `"NG"` は永久にマッチしない。
+
+**修正方針**:
+```python
+death_patterns = [
+    f["text"] for f in review["feedback"]
+    if "過多" in f.get("text", "") or "NG" in f.get("text", "")
+]
+```
+
+---
+
+### Bug-C2: Consolidator実行後のHARDFAILチェックがINSTRUCTIONSに存在しない
+
+**場所**: `zenn-orchestrator/INSTRUCTIONS.md` / `consolidate` アクション処理
+
+**症状**: Consolidatorが生成した記事にHARDFAIL条件が新たに発生しても検知されず、そのままfinalizeに進む。
+
+**E2E実測**: Consolidator実行後に `consecutive_same_length=9` が発生したが、システムは検知せずfinalize手続きへ進んだ（手動介入で回避）。
+
+**現在のINSTRUCTIONS記述（consolidateアクション）**:
+```
+1. Consolidatorを実行
+2. ArticleReviewerを再スポーン
+3. スコアを確定
+4. advance_after_consolidate() を呼び出し
+5. next_action=finalize へ
+```
+
+**修正方針**: Step 3 と Step 4 の間に以下を追加:
+```
+3b. apply_hard_fail(consolidated_article_path) を実行
+    - HARDFAILが検出された場合: Writerに修正指示を出し、記事を更新してStep 2へ戻る（最大2回）
+    - HARDFAILなし: Step 4へ進む
+```
+
+---
+
+### Bug-D1: ArticleReviewer JSONスキーマキー名揺れ
+
+**場所**: `agents/article_reviewer.md` スキーマ定義 / `zenn-article-pdca/INSTRUCTIONS.md` スコア読み取り
+
+**症状**: ArticleReviewerが稀に `weighted_average_raw` キーを使用し、`weighted_average` が存在しないreview.jsonを出力する。スコア読み取りで `KeyError` リスクがある。
+
+**E2E実測**: iter 2のreview.jsonに `"weighted_average_raw": 0.74` が含まれ、`"weighted_average"` キーが欠落していた。
+
+**修正方針**:
+1. `article_reviewer.md` のスキーマ定義でキー名を `weighted_average` に統一し、エージェントへの指示を強化
+2. スコア読み取り側を防御的実装に変更:
+```python
+score = review.get('weighted_average', review.get('weighted_average_raw', 0.0))
+```
+
+---
+
+### Bug-E1: HARDFAILキャップ値とMATERIAL_FALLBACK閾値の論理的矛盾
+
+**場所**: `metrics.py` `DEFAULT_HARD_FAIL` / `checkpoint.py` MATERIAL_FALLBACK条件
+
+**症状**: desu_masu HARDFAILキャップ（0.55）がMATERIAL_FALLBACK閾値（0.70）を下回るため、Bug-A1〜A2が存在する環境では「記事品質は十分だがメトリクスバイアスでHARDFAILが繰り返し発動→スコアが0.55に固定→article_iter>=3でMATERIAL_FALLBACKが誘発」という意図しないフォールバックループが発生しうる。
+
+**対処優先順位**: Bug-A1〜A3（metrics構造バグ）の修正を優先し、メトリクス計算が正確になってからこのリスクを再評価する。
+
+---
+
 *TECH_SPEC.md 終了 — Zenn記事生成 v5.1 スキルベースシステム*
