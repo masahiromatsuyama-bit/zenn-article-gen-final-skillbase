@@ -30,8 +30,8 @@
   "properties": {
     "phase": {
       "type": "string",
-      "enum": ["layer1", "material_pdca", "article_pdca", "done"],
-      "description": "現在のフェーズ。layer1=戦略・評価設計、material_pdca=素材PDCA、article_pdca=記事PDCA、done=完了"
+      "enum": ["layer1", "topic_selection", "experience_authoring", "material_pdca", "article_pdca", "done"],
+      "description": "現在のフェーズ。layer1=戦略・評価設計、topic_selection=トピック選定、experience_authoring=著者経験ログ生成（v5.2 NEW）、material_pdca=素材PDCA、article_pdca=記事PDCA、done=完了"
     },
     "next_action": {
       "type": "string",
@@ -39,6 +39,8 @@
         "run_strategist",
         "run_eval_designer",
         "run_system_analyst",
+        "run_topic_selector",
+        "run_experience_author",
         "run_material_iter",
         "run_article_iter",
         "material_fallback",
@@ -46,7 +48,7 @@
         "finalize",
         "done"
       ],
-      "description": "次に実行するアクション識別子"
+      "description": "次に実行するアクション識別子（v5.2 で run_experience_author を追加）"
     },
     "material_iter": {
       "type": "integer",
@@ -113,8 +115,10 @@
 |---|---|---|---|---|
 | `layer1` | `run_strategist` | 常に | `layer1` | `run_eval_designer` |
 | `layer1` | `run_eval_designer` | `strategy.md` の `requires_system_analysis=true` | `layer1` | `run_system_analyst` |
-| `layer1` | `run_eval_designer` | `requires_system_analysis=false` | `material_pdca` | `run_material_iter` |
-| `layer1` | `run_system_analyst` | 常に | `material_pdca` | `run_material_iter` |
+| `layer1` | `run_eval_designer` | `requires_system_analysis=false` | `topic_selection` | `run_topic_selector` |
+| `layer1` | `run_system_analyst` | 常に | `topic_selection` | `run_topic_selector` |
+| `topic_selection` | `run_topic_selector` | 常に | `experience_authoring` | `run_experience_author` |
+| `experience_authoring` | `run_experience_author` | 常に（成功/失敗にかかわらず） | `material_pdca` | `run_material_iter` |
 | `material_pdca` | `run_material_iter` | score >= 0.85 OR material_iter == 5 | `article_pdca` | `run_article_iter` |
 | `material_pdca` | `run_material_iter` | score < 0.85 AND material_iter < 5 | `material_pdca` | `run_material_iter` |
 | `article_pdca` | `run_article_iter` | score >= 0.80 AND article_iter < 3 | `article_pdca` | `finalize` |
@@ -132,6 +136,8 @@
 | phase | 有効な next_action 値 |
 |---|---|
 | `layer1` | `run_strategist`, `run_eval_designer`, `run_system_analyst` |
+| `topic_selection` | `run_topic_selector` |
+| `experience_authoring` | `run_experience_author` (v5.2 NEW) |
 | `material_pdca` | `run_material_iter`, `material_fallback` |
 | `article_pdca` | `run_article_iter`, `material_fallback`, `consolidate`, `finalize` |
 | `done` | `done` |

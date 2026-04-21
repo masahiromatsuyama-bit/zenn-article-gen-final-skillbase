@@ -153,6 +153,20 @@ Claude Code のサブスクリプション内で完結し、別途 API 課金は
 │  [requires_system_analysis=true のみ]                   │
 │    SystemAnalyst → knowledge/system_analysis.md         │
 └──────────────────────┬──────────────────────────────────┘
+                       │ next_action = run_topic_selector
+                       ▼
+┌─────────────────────────────────────────────────────────┐
+│  Topic Selection（初回のみ）                              │
+│  TrendResearcher → knowledge/trends.md                  │
+│  TopicProposer + TopicFinalizer → topic.md              │
+└──────────────────────┬──────────────────────────────────┘
+                       │ next_action = run_experience_author
+                       ▼
+┌─────────────────────────────────────────────────────────┐
+│  Experience Authoring（初回のみ・v5.2 NEW）              │
+│  ExperienceAuthor → knowledge/experience_log.md         │
+│  （著者の生々しい経験ログを一次情報源として記録）        │
+└──────────────────────┬──────────────────────────────────┘
                        │ next_action = run_material_iter
                        ▼
 ┌─────────────────────────────────────────────────────────┐
@@ -211,6 +225,37 @@ checkpoint 更新: phase="material_pdca", next_action="run_material_iter"
 - Strategist は記事テーマ・対象読者・差別化ポイントを `strategy.md` に書き出す。`requires_system_analysis` フラグも必ず出力
 - EvalDesigner は `strategy.md` と `human-bench/` のベンチマーク記事 3-4 本を読み、自己参照を避けた評価軸を `eval_criteria.md` に定義（v5.1 FIX-D-1）
 - SystemAnalyst は `requires_system_analysis=true` の時のみ起動し、記事対象システムの設計解説を `system_analysis.md` に書き出す。ThesisDesigner / Writer が後続で参照（v5.1 FIX-B-1）
+
+### 5.1.5 Topic Selection（初回のみ）
+
+```
+checkpoint.next_action == "run_topic_selector"
+    ↓
+zenn-topic-selection skill 起動
+  Step 1: TrendResearcher → knowledge/trends.md
+  Step 2: TopicProposer  → 候補 5 案（中間・非永続化）
+  Step 3: TopicFinalizer → topic.md（6 軸採点で選定）
+    ↓
+checkpoint 更新: phase="experience_authoring", next_action="run_experience_author"
+```
+
+### 5.1.8 Experience Authoring（初回のみ・v5.2 NEW）
+
+```
+checkpoint.next_action == "run_experience_author"
+    ↓
+ExperienceAuthor(strategy.md + trends.md + system_analysis.md + topic.md + eval_criteria.md)
+  → output/knowledge/experience_log.md
+    （著者の「数値で驚いたこと」「ハマったこと」「こう思ったのに違った」等を固定テンプレで記録）
+    ↓
+checkpoint 更新: phase="material_pdca", next_action="run_material_iter"
+```
+
+- **目的**: Material PDCA が LLM 想像による一人称挿話を捏造する病を断つ。著者の生々しい経験を一次情報源として外部化し、ThesisDesigner が必ずこのファイルから引用する運用にする
+- **入力**: Topic Selection までに生成された全ファイル（reader_pains.md は Material PDCA 内部生成のため含まない）
+- **出力**: `knowledge/experience_log.md`（固定テンプレート準拠）
+- **失敗時**: 3 回 retry 後スキップし、`experience_log.md` 無しで Material PDCA に進む。ThesisDesigner 側は「存在する場合のみ」扱いなので動作継続可能（`report.json.degraded_mode=true` で記録）
+- ThesisDesigner / Writer / MaterialReviewer への直接入力は **ThesisDesigner のみ**（Writer は thesis.md 経由で間接的に受け取る。案A・単一 source of truth 維持）
 
 ### 5.2 Material PDCA
 
@@ -322,8 +367,8 @@ next_action に基づいてルーティング:
 
 ```json
 {
-  "phase": "layer1 | material_pdca | article_pdca | done",
-  "next_action": "run_strategist | run_eval_designer | run_system_analyst | run_material_iter | run_article_iter | material_fallback | consolidate | finalize | done",
+  "phase": "layer1 | topic_selection | experience_authoring | material_pdca | article_pdca | done",
+  "next_action": "run_strategist | run_eval_designer | run_system_analyst | run_topic_selector | run_experience_author | run_material_iter | run_article_iter | material_fallback | consolidate | finalize | done",
   "material_iter": 0,
   "article_iter": 0,
   "best_material_score": 0.0,
@@ -334,6 +379,8 @@ next_action に基づいてルーティング:
   "last_updated": "2026-04-20T12:34:56+09:00"
 }
 ```
+
+> v5.2 で `experience_authoring` phase と `run_experience_author` / `run_topic_selector` next_action が VALID_TRANSITIONS に正式追加された（checkpoint.py:28-35）。既存 ran の checkpoint.json（v5.1 まで）は新 phase を踏まないため、中断ランの再開時は手動で next_action を書き換えるか FRESH_STATE から再実行する。
 
 ### フィールド説明
 
@@ -359,7 +406,11 @@ run_eval_designer
     ↓ requires_system_analysis=true の時のみ
 run_system_analyst
     ↓
-run_material_iter (material_iter++)
+run_topic_selector                          (phase=topic_selection)
+    ↓
+run_experience_author  (v5.2 NEW)           (phase=experience_authoring)
+    ↓
+run_material_iter (material_iter++)         (phase=material_pdca)
     ↓ score >= 0.85 or iter >= 5
 run_article_iter (article_iter++)
     ↓ iter >= 3 && score < 0.70
@@ -385,9 +436,11 @@ output/
 ├── strategy.md                       # Strategist 出力（requires_system_analysis frontmatter 含む）
 ├── eval_criteria.md                  # EvalDesigner 出力（## ベンチマーク に human-bench 参照必須）
 ├── knowledge/
-│   ├── trends.md                     # TrendResearcher 出力
-│   ├── reader_pains.md               # PainExtractor 出力
+│   ├── trends.md                     # TrendResearcher 出力（Topic Selection）
+│   ├── reader_pains.md               # PainExtractor 出力（Material PDCA iter 1 内部生成）
+│   ├── experience_log.md             # ExperienceAuthor 出力（v5.2 NEW・著者の生々しい経験）
 │   └── system_analysis.md            # SystemAnalyst 出力（条件付き生成）
+├── topic.md                          # TopicFinalizer 出力（Topic Selection）
 ├── thesis.md                         # ThesisDesigner 出力（各 iter で上書き）
 ├── thesis_history/
 │   └── {iter}.md                     # 各 iter の thesis.md スナップショット（iter >= 2 から）
@@ -415,7 +468,9 @@ output/
 | `strategy.md` | Layer 1 のみ | 記事の方向性・読者ペルソナ・差別化軸・`requires_system_analysis` flag |
 | `eval_criteria.md` | Layer 1 のみ | 軸別評価基準 + `## ベンチマーク` セクション（human-bench 記事 ID 必須） |
 | `knowledge/system_analysis.md` | Layer 1（条件付き） | SystemAnalyst が対象ディレクトリを解析した設計解説 |
-| `knowledge/trends.md` | Material PDCA iter 1 + 各フォールバック後 | Webサーチによる最新動向（上書き） |
+| `knowledge/trends.md` | Topic Selection + 各フォールバック後 | Webサーチによる最新動向（上書き） |
+| `topic.md` | Topic Selection | TopicFinalizer が 6 軸採点で選定した 1 案（selected_title / scope / deep_dive_targets 等） |
+| `knowledge/experience_log.md` | Experience Authoring（初回のみ・v5.2 NEW） | 著者の生々しい経験ログ（数値で驚いたこと / ハマったこと等・固定テンプレ）。ThesisDesigner の一次情報源。失敗時はスキップ可能 |
 | `knowledge/reader_pains.md` | Material PDCA iter 1 + 各フォールバック後 | ペインポイント・よくある疑問（上書き） |
 | `thesis.md` | Material PDCA 各 iter Phase 1 | 主張・構成・セクション骨子（上書き） |
 | `thesis_history/{iter}.md` | Material PDCA iter >= 2 の spawn 前 | 前 iter の thesis スナップショット |

@@ -216,7 +216,7 @@
 - **担当スクリプト**: `checkpoint.py`（新設、決定論的Pythonスクリプト）
 - **ファイル**: `checkpoint.json`（ランごとにリセット）
 - **`next_action` フィールド**: セッション再開時に次に実行すべきアクションを特定するためのフィールド
-  - 取りうる値: `"run_strategist"`, `"run_eval_designer"`, `"run_system_analyst"`, `"run_material_iter"`, `"material_fallback"`, `"run_article_iter"`, `"consolidate"`, `"finalize"`, `"done"`
+  - 取りうる値: `"run_strategist"`, `"run_eval_designer"`, `"run_system_analyst"`, `"run_topic_selector"`, `"run_experience_author"`（v5.2 NEW）, `"run_material_iter"`, `"material_fallback"`, `"run_article_iter"`, `"consolidate"`, `"finalize"`, `"done"`
 - **保存タイミング**: 各フェーズ完了直後に `checkpoint.json` を更新する
 - **復元フロー**: セッション再開時に `checkpoint.json` を読み込み、`next_action` の値からフェーズを再開する
 - **状態保持対象**: 現在のイテレーション番号、現在のスコア、レビュー履歴の件数
@@ -242,6 +242,19 @@
   - EvalDesigner は `human-bench/index.yaml` と同系統の記事 3-4 本を必ず読んで評価軸を設計する
   - eval_criteria.md の `## ベンチマーク` セクションに参照した記事 ID を最低3件明記する
   - MaterialReviewer / ArticleReviewer は eval_criteria.md で参照されているベンチ記事を必ず読み、各軸のスコアリングに比較コメントを含める
+
+#### FR-NEW-08: Experience Authoring phase（v5.2 追加）
+
+- **問題**: Material PDCA に渡される入力は、ユーザーの 1-2 行のテーマ発話から LLM が想像で膨らませた strategy.md / reader_pains.md / topic.md と、外部クロール結果の trends.md、静的コード解説の system_analysis.md のみ。**著者本人の生々しい経験・固有の数値・個別の失敗は 1 ビットも含まれない**。結果、ThesisDesigner / Writer が一人称の失敗描写を憶測で捏造し、記事が AI 臭くなる
+- **仕様**:
+  - Topic Selection 完了後・Material PDCA 開始前に 1 回だけ実行される新 phase `experience_authoring` を追加
+  - `ExperienceAuthor` agent が `strategy.md` / `trends.md`（存在する場合）/ `system_analysis.md`（存在する場合）/ `topic.md`（存在する場合）/ `eval_criteria.md` を入力に、`output/knowledge/experience_log.md` を固定テンプレートで出力
+  - テンプレートセクション: `## 数値で驚いたこと`（必須1件以上）/ `## ハマったこと`（必須1件以上）/ `## 「こう思ったのに違った」体験`（推奨）/ `## 未解決の疑問・迷い` / `## 既存記事とのズレを感じた箇所` / `## 使わない素材`
+  - ThesisDesigner の入力に `experience_log.md` を**最優先ソース**として追加。一人称の失敗描写・生々しい数値・具体的な日時・個人的な迷い・感情反応は、必ずこのファイルから引用する（憶測禁止）
+  - Writer は experience_log を**直接参照しない**（案A・単一 source of truth 維持）。thesis.md 経由で間接的に受け取る
+  - 失敗時は 3 回 retry 後スキップし、experience_log.md 無しで Material PDCA に進む。ThesisDesigner は「存在する場合のみ」扱い。report.json に `degraded_mode=true` を記録
+- **checkpoint 遷移**: `advance_topic_selection(cp)` → `phase="experience_authoring", next_action="run_experience_author"` → `advance_experience_authoring(cp)` → `phase="material_pdca", next_action="run_material_iter"`
+- **実装状態**: インターフェース層（入出力・checkpoint 遷移・Stage Dispatch）完了、`experience_author.md` の中身ロジック（ログ収集方式）は別途議論・差し替え予定
 
 #### FR-NEW-07: major feedback による score cap（v5.1 追加、FIX-D-2）
 
