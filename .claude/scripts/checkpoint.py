@@ -27,6 +27,7 @@ FRESH_STATE: Dict = {
 # Valid next_action values per phase
 VALID_TRANSITIONS: Dict[str, list] = {
     "layer1": ["run_strategist", "run_eval_designer", "run_system_analyst"],
+    "topic_selection": ["run_topic_selector"],
     "material_pdca": ["run_material_iter", "material_fallback"],
     "article_pdca": ["run_article_iter", "material_fallback", "consolidate", "finalize"],
     "done": ["done"],
@@ -84,11 +85,19 @@ def advance_layer1(
         if requires_system_analysis:
             cp["next_action"] = "run_system_analyst"
         else:
-            cp["phase"] = "material_pdca"
-            cp["next_action"] = "run_material_iter"
+            cp["phase"] = "topic_selection"
+            cp["next_action"] = "run_topic_selector"
     elif completed_step == "system_analyst":
-        cp["phase"] = "material_pdca"
-        cp["next_action"] = "run_material_iter"
+        cp["phase"] = "topic_selection"
+        cp["next_action"] = "run_topic_selector"
+    return cp
+
+
+def advance_topic_selection(checkpoint: Dict) -> Dict:
+    """topic_selection 完了後に material_pdca へ進む。"""
+    cp = dict(checkpoint)
+    cp["phase"] = "material_pdca"
+    cp["next_action"] = "run_material_iter"
     return cp
 
 

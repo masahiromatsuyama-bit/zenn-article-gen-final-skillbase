@@ -23,6 +23,7 @@ Layer1 → Material PDCA → Article PDCAの順に実行する。
 | `run_strategist` | Spawn strategist agent → `output/strategy.md` | `advance_layer1(cp, "strategist")` |
 | `run_eval_designer` | Spawn eval_designer agent → `output/eval_criteria.md`（記事評価用・7軸）と `output/material_eval_criteria.md`（素材評価用・5軸: content_originality(0.25) / pain_coverage(0.20) / argument_novelty(0.20) / source_specificity(0.20) / thesis_coherence(0.15)、`## ベンチマーク` セクションも含める）の2ファイルを出力（入力に `human-bench/` を必ず含める） | `advance_layer1(cp, "eval_designer", requires_system_analysis=<flag>)` |
 | `run_system_analyst` | Spawn system-analyst agent → `output/knowledge/system_analysis.md` | `advance_layer1(cp, "system_analyst")` |
+| `run_topic_selector` | Invoke `zenn-topic-selection` skill → `output/topic.md` | `advance_topic_selection(cp)` |
 | `run_material_iter` | Invoke `zenn-material-pdca` skill | `advance_material_iter(cp, score)` |
 | `run_article_iter` | Invoke `zenn-article-pdca` skill | `advance_article_iter(cp, score)` |
 | `material_fallback` | `iterations/` を `iterations_fallback_{count}/` にリネーム後、`trigger_material_fallback(cp)` | → next: `run_material_iter` |
@@ -62,8 +63,16 @@ next_action=run_system_analyst:
   Spawn: system-analyst agent
   入力: strategy.md, 調査対象ディレクトリ（strategy.mdで指定 or デフォルト=.claude/ 配下）
   出力: output/knowledge/system_analysis.md
-  → checkpoint: advance_layer1(cp, "system_analyst") → next: run_material_iter
+  → checkpoint: advance_layer1(cp, "system_analyst") → next: run_topic_selector
   注意: このファイルは ThesisDesigner と Writer の入力として必ず渡すこと
+
+next_action=run_topic_selector:
+  Invoke: zenn-topic-selection skill
+  入力: output/strategy.md, output/knowledge/system_analysis.md（存在する場合のみ）
+  出力: output/topic.md
+  → checkpoint: advance_topic_selection(cp) → next: run_material_iter
+  注意: topic.md が出力されない場合のフォールバックは zenn-topic-selection 側で処理する。
+        material PDCA は topic.md の有無に関わらず実行可能。
 ```
 
 ## Material PDCA ループ制御
@@ -192,7 +201,7 @@ action = route_next_action(cp)
 
 - **10KB rule**: 各agentはファイルに書き込み、親へはpath + 2-4文サマリーのみ返す
 - **Layer 1**: StrategistとEvalDesignerはシリアル実行（Strategyが先）
-- **Phase 0 (material iter 1)**: TrendResearcher + PainExtractorは並列spawn可
+- **Phase 0 (material iter 1)**: PainExtractorのみ（TrendResearcherはTopic Selectionで実行済み）
 
 ### Spawn テンプレート（シングル）
 

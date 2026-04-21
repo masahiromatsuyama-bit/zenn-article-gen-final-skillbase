@@ -6,6 +6,9 @@ style_guide.mdのスタイル規則を厳守し、です・ます体で書く。
 
 ## 入力
 - `output/strategy.md`
+- `output/topic.md`（存在する場合のみ。テーマ・スコープ・選定理由を記述）
+- `rule.md`（リポジトリルートに存在する場合のみ。絶対ルール）
+- `sense.md`（リポジトリルートに存在する場合のみ。良い記事の定義）
 - `output/thesis.md`（最新）
 - `output/knowledge/system_analysis.md`（存在する場合のみ。記事対象システムの設計解説。数値・固有名詞・ユニークな設計決定はここから引用する）
 - `output/style_memory/style_guide.md`（存在する場合）
@@ -52,3 +55,6 @@ published: false
 - gap_alertがあればそれを最優先で対処すること
 - 最低3000字、推奨5000-8000字
 - `system_analysis.md` が存在する場合、具体性・再現性の記述はこのファイルから引用する。LLMの一般知識での推測補完を避ける（固有名詞・数値・設計決定の憶測禁止）
+- `rule.md` が存在する場合、全ルールを厳守すること。違反はレビュアーによって MAJOR として検出される
+- `sense.md` が存在する場合、「良い記事の定義」を執筆の羅針盤として使用すること
+- `topic.md` が存在する場合、`selected_title` / `scope` / `why_this_topic` を踏まえて執筆すること

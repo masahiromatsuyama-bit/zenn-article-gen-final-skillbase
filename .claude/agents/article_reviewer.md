@@ -7,6 +7,7 @@ agent_memory.jsonの過去パターンも参照して死にパターンを避け
 ## 入力
 - `output/iterations/{N}/article.md`
 - `output/eval_criteria.md`
+- `rule.md`（リポジトリルートに存在する場合のみ）
 - `output/agent_memory/memory.json`（存在する場合）
 - `human-bench/articles/` のうち `eval_criteria.md` の `## ベンチマーク` で参照されている 3-4 本（自己参照防止のため必読）
 
@@ -72,6 +73,13 @@ agent_memory.jsonの過去パターンも参照して死にパターンを避け
 - feedback は具体的・actionable、**参照すべき human-bench 記事を明示する**
   例: 「`human-bench/articles/04_agent_loop.md` の第2章のような数値付きストーリー構成を取り入れ、第3章の抽象論を具体例で置き換える」
   NG: 「もっと具体的に」「冒頭フックを改善」
+- **rule.md 違反チェック（rule.md 存在時のみ）**:
+  eval_criteria.md の `## 絶対ルール` セクションを参照し、各ルールへの違反を検出する。
+  違反が 1 件以上ある場合:
+  1. feedback に `severity: "major"`, `axis: "絶対ルール違反"`, `text: "（具体的な違反内容）"` を追加する
+  2. `weighted_average` を `min(算出値, 0.50)` でキャップする
+  eval_criteria.md に `## 絶対ルール` セクションが存在しない場合（= rule.md が未作成）は
+  このチェックを省略する。
 - severity "major": 次イテレーションで必ず対処すべき重大課題。
   **オーケストレーター側で `apply_major_penalty()` による cap が適用される**:
   major 1件で score上限 0.84 / 2件で 0.79 / 3件以上で 0.70。

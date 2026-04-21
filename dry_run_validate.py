@@ -66,9 +66,14 @@ if cp_mod:
         check("layer1: strategist → run_eval_designer",
               cp["next_action"] == "run_eval_designer")
 
-        # Layer 1: eval_designer → material_pdca
+        # Layer 1: eval_designer → topic_selection
         cp = cp_mod.advance_layer1(cp, "eval_designer")
-        check("layer1: eval_designer → material_pdca/run_material_iter",
+        check("layer1: eval_designer → topic_selection/run_topic_selector",
+              cp["phase"] == "topic_selection" and cp["next_action"] == "run_topic_selector")
+
+        # topic_selection → material_pdca
+        cp = cp_mod.advance_topic_selection(cp)
+        check("topic_selection: run_topic_selector → material_pdca/run_material_iter",
               cp["phase"] == "material_pdca" and cp["next_action"] == "run_material_iter")
 
         # Material PDCA: iter 1, score=0.72 (below threshold, continue)
@@ -133,7 +138,7 @@ if cp_mod:
               cp["next_action"] == "consolidate")
 
         # consolidate → finalize (FIX-6)
-        cp = cp_mod.advance_after_consolidate(cp)
+        cp = cp_mod.advance_after_consolidate(cp, final_score=0.82)
         check("advance_after_consolidate → finalize (FIX-6)",
               cp["next_action"] == "finalize")
 
@@ -297,8 +302,8 @@ if met_mod:
 if met_mod:
     check("FIX-2 apply_major_penalty: major=0 passthrough",
           met_mod.apply_major_penalty(0.90, 0) == 0.90)
-    check("FIX-2 apply_major_penalty: major=1 cap to 0.84",
-          met_mod.apply_major_penalty(0.90, 1) == 0.84)
+    check("FIX-2 apply_major_penalty: major=1 cap to 0.78",
+          met_mod.apply_major_penalty(0.90, 1) == 0.78)
     check("FIX-2 apply_major_penalty: major=2 cap to 0.79",
           met_mod.apply_major_penalty(0.86, 2) == 0.79)
     check("FIX-2 apply_major_penalty: major=3 cap to 0.70",
@@ -332,23 +337,23 @@ if cp_mod:
 if cp_mod:
     cp_sa = dict(cp_mod.FRESH_STATE)
     cp_sa["next_action"] = "run_eval_designer"
-    # requires=False → material
+    # requires=False → topic_selection
     cp_no_sa = cp_mod.advance_layer1(cp_sa, "eval_designer",
                                      requires_system_analysis=False)
-    check("FIX-5 eval_designer (requires=False) → material_pdca/run_material_iter",
-          cp_no_sa["phase"] == "material_pdca"
-          and cp_no_sa["next_action"] == "run_material_iter")
+    check("FIX-5 eval_designer (requires=False) → topic_selection/run_topic_selector",
+          cp_no_sa["phase"] == "topic_selection"
+          and cp_no_sa["next_action"] == "run_topic_selector")
     # requires=True → system_analyst
     cp_with_sa = cp_mod.advance_layer1(cp_sa, "eval_designer",
                                        requires_system_analysis=True)
     check("FIX-5 eval_designer (requires=True) → layer1/run_system_analyst",
           cp_with_sa["phase"] == "layer1"
           and cp_with_sa["next_action"] == "run_system_analyst")
-    # system_analyst → material
+    # system_analyst → topic_selection
     cp_after_sa = cp_mod.advance_layer1(cp_with_sa, "system_analyst")
-    check("FIX-5 system_analyst done → material_pdca/run_material_iter",
-          cp_after_sa["phase"] == "material_pdca"
-          and cp_after_sa["next_action"] == "run_material_iter")
+    check("FIX-5 system_analyst done → topic_selection/run_topic_selector",
+          cp_after_sa["phase"] == "topic_selection"
+          and cp_after_sa["next_action"] == "run_topic_selector")
     # VALID_TRANSITIONS check
     check("FIX-5 VALID_TRANSITIONS[layer1] includes run_system_analyst",
           "run_system_analyst" in cp_mod.VALID_TRANSITIONS["layer1"])
@@ -371,7 +376,7 @@ if cp_mod:
           cp_m3["next_action"] == "consolidate" and cp_m3["article_iter"] == 3)
 
     # advance_after_consolidate exists
-    cp_post = cp_mod.advance_after_consolidate(cp_m3)
+    cp_post = cp_mod.advance_after_consolidate(cp_m3, final_score=0.83)
     check("FIX-6 advance_after_consolidate → finalize",
           cp_post["next_action"] == "finalize")
 

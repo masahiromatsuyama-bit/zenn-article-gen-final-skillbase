@@ -32,20 +32,10 @@ MATERIAL_THRESHOLD = 0.85  # gap_alert 判定に使用
 
 ### iter == 1 の場合
 
-**Step 1: 並列 spawn（TrendResearcher + PainExtractor）**
+**Step 1: PainExtractor を spawn**
 
-TrendResearcher と PainExtractor は互いに独立しているため、同時 spawn する。
-
-- **TrendResearcher**
-  - 入力: `strategy.md`
-  - 出力: `knowledge/trends.md`
-  - 以下のクエリで WebSearch を順番に実行し、上位5件の情報を trends.md に記録すること:
-    1. "Zenn 技術記事 トレンド 2026"
-    2. "Claude Code マルチエージェント 2026"
-    3. strategy.md の article_topic キーワード + " Zenn 2026"
-  - 取得できた場合: 記事タイトル・URL・概要を箇条書きで trends.md に記載
-  - すべての WebSearch が失敗した場合: trends.md の先頭に [FALLBACK: web_search_failed] を記録し、LLM の学習知識によるトレンド推定を記述すること（推測であることを明記）
-  - 返却: ファイルパス + 2〜4文サマリー
+TrendResearcher は Topic Selection フェーズで実行済み（`output/knowledge/trends.md` 生成済み）。
+iter==1 では PainExtractor のみ spawn する。
 
 - **PainExtractor**
   - 入力: `strategy.md`
@@ -54,7 +44,7 @@ TrendResearcher と PainExtractor は互いに独立しているため、同時 
 
 **Step 2: ThesisDesigner を spawn**
 
-- 入力: `strategy.md`, `knowledge/trends.md`, `knowledge/reader_pains.md`, `knowledge/system_analysis.md`（存在する場合のみ）
+- 入力: `strategy.md`, `knowledge/trends.md`（存在する場合のみ。Topic Selectionが生成）, `knowledge/reader_pains.md`, `knowledge/system_analysis.md`（存在する場合のみ）, `output/topic.md`（存在する場合のみ。存在しない場合は strategy.md のスコープ情報を代わりに使用）
 - 出力: `thesis.md`
 - 返却: ファイルパス + 2〜4文サマリー
 
@@ -134,8 +124,9 @@ if should_trigger_gap_alert(score_history, MATERIAL_THRESHOLD):
 
 - 入力:
   - `strategy.md`
-  - `knowledge/trends.md`, `knowledge/reader_pains.md`
+  - `knowledge/trends.md`（存在する場合のみ）, `knowledge/reader_pains.md`
   - `knowledge/system_analysis.md`（存在する場合のみ）
+  - `output/topic.md`（存在する場合のみ。存在しない場合は strategy.md のスコープ情報を代わりに使用）
   - `thesis_history/{iter-1}.md`（前回 thesis スナップショット）
   - 前回レビューの `feedback`（Step 1 で取得済み）
   - `gap_alert_text`（存在する場合はプロンプトに埋め込む）
@@ -216,5 +207,5 @@ final_score = apply_major_penalty(raw_score, major_count)
 ## SubAgent spawn ルール
 
 - **10KB rule**: 各 agent はファイルに書き込み、返却はファイルパス + 2〜4文サマリーのみ。大量テキストを返さない。
-- **並列 spawn は iter 1 のみ**: TrendResearcher と PainExtractor のみ並列。ThesisDesigner 以降はシリアル実行。
+- **並列 spawn は行わない**: iter 1 では PainExtractor のみ（TrendResearcher は Topic Selection 済み）。ThesisDesigner 以降はシリアル実行。
 - **iter 2 以降はシリアル**: 前回フィードバックの依存関係があるため。
