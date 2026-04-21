@@ -10,8 +10,10 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
-# Default output dir: repo_root/output/
-DEFAULT_OUTPUT_DIR = Path(__file__).parent.parent.parent / "output"
+# Default output dir: repo_root/output/{ARTICLE_ID} if env var is set, else repo_root/output/
+_BASE_OUTPUT = Path(__file__).parent.parent.parent / "output"
+_ARTICLE_ID = os.environ.get("ARTICLE_ID", "").strip()
+DEFAULT_OUTPUT_DIR = _BASE_OUTPUT / _ARTICLE_ID if _ARTICLE_ID else _BASE_OUTPUT
 
 
 class Paths:
@@ -20,6 +22,7 @@ class Paths:
     # Layer 1
     STRATEGY = "strategy.md"
     EVAL_CRITERIA = "eval_criteria.md"
+    MATERIAL_EVAL_CRITERIA = "material_eval_criteria.md"
 
     # Phase 0
     KB_TRENDS = "knowledge/trends.md"

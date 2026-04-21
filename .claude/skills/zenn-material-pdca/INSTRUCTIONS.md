@@ -39,6 +39,12 @@ TrendResearcher と PainExtractor は互いに独立しているため、同時 
 - **TrendResearcher**
   - 入力: `strategy.md`
   - 出力: `knowledge/trends.md`
+  - 以下のクエリで WebSearch を順番に実行し、上位5件の情報を trends.md に記録すること:
+    1. "Zenn 技術記事 トレンド 2026"
+    2. "Claude Code マルチエージェント 2026"
+    3. strategy.md の article_topic キーワード + " Zenn 2026"
+  - 取得できた場合: 記事タイトル・URL・概要を箇条書きで trends.md に記載
+  - すべての WebSearch が失敗した場合: trends.md の先頭に [FALLBACK: web_search_failed] を記録し、LLM の学習知識によるトレンド推定を記述すること（推測であることを明記）
   - 返却: ファイルパス + 2〜4文サマリー
 
 - **PainExtractor**
@@ -54,7 +60,12 @@ TrendResearcher と PainExtractor は互いに独立しているため、同時 
 
 **Step 3: MaterialReviewer を spawn**
 
-- 入力: `thesis.md`, `eval_criteria.md`, `human-bench/articles/`（eval_criteria.md の ## ベンチマーク で参照されている3-4本）
+- 入力: `thesis.md`, `material_eval_criteria.md`（存在しない場合は `eval_criteria.md` を代替使用し、review.json に `"fallback_note": "material_eval_criteria.md not found, fallback to eval_criteria.md"` を追加すること）, `human-bench/articles/`（## ベンチマーク で参照されている3-4本）
+- 採点方針（必須）:
+  - 各軸のコメントには、参照したベンチマーク記事（タイトルを明記）と比較して何が優れているか・何が劣っているかを具体的に書くこと。
+  - 生成物がベンチマーク記事と同等以下の品質の軸は、スコアを 0.75 上限とする。
+  - ベンチマーク記事を明確に上回っている場合のみ 0.80 以上を許容する。
+  - 「ベンチXXのYYに比べて〜が不足」という形式で feedback の text を書くこと。この形式を守れない feedback は minor ではなく major として扱うこと。
 - 出力: `material_reviews/1/review.json`
   ```json
   {
@@ -133,7 +144,12 @@ if should_trigger_gap_alert(score_history, MATERIAL_THRESHOLD):
 
 **Step 4: MaterialReviewer を spawn**
 
-- 入力: 更新された `thesis.md`, `eval_criteria.md`, `human-bench/articles/`（同上）
+- 入力: 更新された `thesis.md`, `material_eval_criteria.md`（存在しない場合は `eval_criteria.md` を代替使用し、review.json に `"fallback_note": "material_eval_criteria.md not found, fallback to eval_criteria.md"` を追加すること）, `human-bench/articles/`（同上）
+- 採点方針（必須）:
+  - 各軸のコメントには、参照したベンチマーク記事（タイトルを明記）と比較して何が優れているか・何が劣っているかを具体的に書くこと。
+  - 生成物がベンチマーク記事と同等以下の品質の軸は、スコアを 0.75 上限とする。
+  - ベンチマーク記事を明確に上回っている場合のみ 0.80 以上を許容する。
+  - 「ベンチXXのYYに比べて〜が不足」という形式で feedback の text を書くこと。この形式を守れない feedback は minor ではなく major として扱うこと。
 - 出力: `material_reviews/{iter}/review.json`
 - 返却: ファイルパス + 2〜4文サマリー
 
@@ -176,7 +192,7 @@ from metrics import apply_major_penalty
 raw_score = review["weighted_average"]
 major_count = sum(1 for f in review["feedback"] if f.get("severity") == "major")
 final_score = apply_major_penalty(raw_score, major_count)
-# major_count >= 1: score は 0.84 を超えない → material threshold 0.85 を突破できない
+# major_count >= 1: score は 0.78 を超えない → material threshold 0.85 を突破できない
 # これにより major feedback が残っているうちは必ず次イテに進む
 ```
 

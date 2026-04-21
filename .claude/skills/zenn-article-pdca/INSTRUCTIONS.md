@@ -125,6 +125,11 @@ if hf.applied:
 ### Step 4: ArticleReviewer を spawn
 
 - 入力: `iterations/{iter}/article.md`, `eval_criteria.md`, `agent_memory/memory.json`（存在する場合）, `human-bench/articles/`（eval_criteria.md ## ベンチマーク で参照されている3-4本）
+- 採点方針（必須）:
+  - 各軸のコメントには、参照したベンチマーク記事（タイトルを明記）と比較して何が優れているか・何が劣っているかを具体的に書くこと。
+  - 生成物がベンチマーク記事と同等以下の品質の軸は、スコアを 0.75 上限とする。
+  - ベンチマーク記事を明確に上回っている場合のみ 0.80 以上を許容する。
+  - 「ベンチXXのYYに比べて〜が不足」という形式で feedback の text を書くこと。この形式を守れない feedback は minor ではなく major として扱うこと。
 - 出力: `iterations/{iter}/review.json`
   ```json
   {

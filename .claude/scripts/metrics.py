@@ -157,7 +157,7 @@ def apply_major_penalty(score: float, major_count: int) -> float:
     Aligned with the downstream thresholds in checkpoint.py:
       - 3+ major: cap to 0.70 (triggers MATERIAL_FALLBACK if article_iter >= 3)
       - 2 major:  cap to 0.79 (below article threshold 0.80)
-      - 1 major:  cap to 0.84 (below material threshold 0.85)
+      - 1 major:  cap to 0.78 (below article threshold 0.80 and material threshold 0.85)
       - 0 major:  no change
     """
     if major_count >= 3:
@@ -165,7 +165,7 @@ def apply_major_penalty(score: float, major_count: int) -> float:
     if major_count >= 2:
         return min(score, 0.79)
     if major_count >= 1:
-        return min(score, 0.84)
+        return min(score, 0.78)
     return score
 
 

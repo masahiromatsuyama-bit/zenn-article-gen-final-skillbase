@@ -21,7 +21,7 @@ Layer1 → Material PDCA → Article PDCAの順に実行する。
 | next_action | 実行内容 | 完了後のcheckpoint更新 |
 |-------------|---------|----------------------|
 | `run_strategist` | Spawn strategist agent → `output/strategy.md` | `advance_layer1(cp, "strategist")` |
-| `run_eval_designer` | Spawn eval_designer agent → `output/eval_criteria.md`（入力に `human-bench/` を必ず含める） | `advance_layer1(cp, "eval_designer", requires_system_analysis=<flag>)` |
+| `run_eval_designer` | Spawn eval_designer agent → `output/eval_criteria.md`（記事評価用・7軸）と `output/material_eval_criteria.md`（素材評価用・5軸: content_originality(0.25) / pain_coverage(0.20) / argument_novelty(0.20) / source_specificity(0.20) / thesis_coherence(0.15)、`## ベンチマーク` セクションも含める）の2ファイルを出力（入力に `human-bench/` を必ず含める） | `advance_layer1(cp, "eval_designer", requires_system_analysis=<flag>)` |
 | `run_system_analyst` | Spawn system-analyst agent → `output/knowledge/system_analysis.md` | `advance_layer1(cp, "system_analyst")` |
 | `run_material_iter` | Invoke `zenn-material-pdca` skill | `advance_material_iter(cp, score)` |
 | `run_article_iter` | Invoke `zenn-article-pdca` skill | `advance_article_iter(cp, score)` |
@@ -42,7 +42,16 @@ next_action=run_strategist:
 next_action=run_eval_designer:
   Spawn: eval_designer agent
   入力: output/strategy.md, human-bench/index.yaml, human-bench/articles/（strategy.md の記事型に応じて3-4本を重点読解）
-  出力: output/eval_criteria.md
+  出力:
+    - output/eval_criteria.md（記事評価用・7軸・現行のまま）
+    - output/material_eval_criteria.md（素材評価用・以下の5軸で生成）
+      素材軸の定義:
+        - content_originality (weight: 0.25): 他記事では読めない独自知見があるか
+        - pain_coverage (weight: 0.20): 想定読者ペインを充足しているか
+        - argument_novelty (weight: 0.20): 論点・主張が既存記事と差別化されているか
+        - source_specificity (weight: 0.20): 具体的な数値・コマンド等の情報ソースがあるか
+        - thesis_coherence (weight: 0.15): 骨子内の論点が一貫しているか
+      素材軸には ## ベンチマーク セクションも記載すること（同じベンチ記事を参照）
   → strategy.md の frontmatter から requires_system_analysis を読む:
        import yaml; flag = yaml.safe_load(open("output/strategy.md").read().split("---")[1])["requires_system_analysis"]
      （または正規表現 ^requires_system_analysis:\s*(true|false) を使う）
