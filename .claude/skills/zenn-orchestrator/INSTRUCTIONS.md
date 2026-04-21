@@ -83,10 +83,13 @@ next_action=run_experience_author:
     - output/knowledge/system_analysis.md（存在する場合のみ）
     - output/topic.md（存在する場合のみ）
     - output/eval_criteria.md（品質センス参考用）
-  出力: output/knowledge/experience_log.md（著者の生々しい経験の一次情報源）
+  出力:
+    - output/knowledge/experience_log.md（下流が読む圧縮版・著者の生々しい経験の一次情報源）
+    - output/knowledge/drama_raw.md（3 役対話の生ログ・Multi-Agent Drama Simulation の副産物）
   → checkpoint: advance_experience_authoring(cp) → next: run_material_iter
   注意:
-    - このファイルは ThesisDesigner の入力として必ず渡すこと（最優先ソース）
+    - experience_log.md は ThesisDesigner の入力として必ず渡すこと（最優先ソース）
+    - drama_raw.md は下流に渡さない（後日のデバッグ / 再圧縮用）
     - experience_author 失敗時は 3 回 retry 後スキップし、experience_log.md 無しで
       Material PDCA に進む。ThesisDesigner 側は「存在する場合のみ」扱い
     - このフェーズは 1 回きり実行。iter >= 2 では再実行されない

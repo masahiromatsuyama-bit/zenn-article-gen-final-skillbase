@@ -28,6 +28,7 @@ class Paths:
     KB_TRENDS = "knowledge/trends.md"
     KB_READER_PAINS = "knowledge/reader_pains.md"
     KB_EXPERIENCE_LOG = "knowledge/experience_log.md"
+    KB_DRAMA_RAW = "knowledge/drama_raw.md"
 
     # Phase 1
     THESIS = "thesis.md"

@@ -245,15 +245,20 @@ checkpoint 更新: phase="experience_authoring", next_action="run_experience_aut
 checkpoint.next_action == "run_experience_author"
     ↓
 ExperienceAuthor(strategy.md + trends.md + system_analysis.md + topic.md + eval_criteria.md)
-  → output/knowledge/experience_log.md
-    （著者の「数値で驚いたこと」「ハマったこと」「こう思ったのに違った」等を固定テンプレで記録）
+  ├─ Phase 1: Director 準備（system_analysis / topic から罠抽出 → 事件 2-3 個選定）
+  ├─ Phase 2: Drama 実行（3 役 × 8 ターン → drama_raw.md に逐次追記）
+  └─ Phase 3: ログ圧縮（drama_raw.md → experience_log.md）
+  → output/knowledge/drama_raw.md        （3 役対話の生ログ）
+  → output/knowledge/experience_log.md   （圧縮版・下流入力）
     ↓
 checkpoint 更新: phase="material_pdca", next_action="run_material_iter"
 ```
 
 - **目的**: Material PDCA が LLM 想像による一人称挿話を捏造する病を断つ。著者の生々しい経験を一次情報源として外部化し、ThesisDesigner が必ずこのファイルから引用する運用にする
+- **実装方式（v5.2.1 NEW）**: **Multi-Agent Drama Simulation**（Option E）を採用。3 役（Human / Claude / Director）を 1 プロンプト内で演じ分け、情報非対称性（Claude はノーヒント・Director が罠を仕込む・Human はプロエンジニアで題材システム固有の罠は未知）を契約として守らせる。8 ターン目安で事件 2-3 個を発火させ、試行錯誤のログを `drama_raw.md` に蓄積、その圧縮が `experience_log.md`
+- **検討された代替案**: Option A（著者対話）/ B（git・PR mining）/ C（単発 Synthesis）/ D（B+A Hybrid）。A/D は著者手作業コスト、B は一次資料アクセス前提、C は AI 臭の温床と判断し、情報非対称で構造化シミュレーションする E を採用
 - **入力**: Topic Selection までに生成された全ファイル（reader_pains.md は Material PDCA 内部生成のため含まない）
-- **出力**: `knowledge/experience_log.md`（固定テンプレート準拠）
+- **出力**: `knowledge/experience_log.md`（固定テンプレート準拠・下流入力）+ `knowledge/drama_raw.md`（副産物・下流は読まない）
 - **失敗時**: 3 回 retry 後スキップし、`experience_log.md` 無しで Material PDCA に進む。ThesisDesigner 側は「存在する場合のみ」扱いなので動作継続可能（`report.json.degraded_mode=true` で記録）
 - ThesisDesigner / Writer / MaterialReviewer への直接入力は **ThesisDesigner のみ**（Writer は thesis.md 経由で間接的に受け取る。案A・単一 source of truth 維持）
 
@@ -438,7 +443,8 @@ output/
 ├── knowledge/
 │   ├── trends.md                     # TrendResearcher 出力（Topic Selection）
 │   ├── reader_pains.md               # PainExtractor 出力（Material PDCA iter 1 内部生成）
-│   ├── experience_log.md             # ExperienceAuthor 出力（v5.2 NEW・著者の生々しい経験）
+│   ├── experience_log.md             # ExperienceAuthor 出力（v5.2 NEW・著者の生々しい経験・Drama 圧縮版）
+│   ├── drama_raw.md                  # ExperienceAuthor 副産物（v5.2.1 NEW・3 役対話の生ログ）
 │   └── system_analysis.md            # SystemAnalyst 出力（条件付き生成）
 ├── topic.md                          # TopicFinalizer 出力（Topic Selection）
 ├── thesis.md                         # ThesisDesigner 出力（各 iter で上書き）
@@ -470,7 +476,8 @@ output/
 | `knowledge/system_analysis.md` | Layer 1（条件付き） | SystemAnalyst が対象ディレクトリを解析した設計解説 |
 | `knowledge/trends.md` | Topic Selection + 各フォールバック後 | Webサーチによる最新動向（上書き） |
 | `topic.md` | Topic Selection | TopicFinalizer が 6 軸採点で選定した 1 案（selected_title / scope / deep_dive_targets 等） |
-| `knowledge/experience_log.md` | Experience Authoring（初回のみ・v5.2 NEW） | 著者の生々しい経験ログ（数値で驚いたこと / ハマったこと等・固定テンプレ）。ThesisDesigner の一次情報源。失敗時はスキップ可能 |
+| `knowledge/experience_log.md` | Experience Authoring（初回のみ・v5.2 NEW） | 著者の生々しい経験ログ（数値で驚いたこと / ハマったこと等・固定テンプレ）。Drama Simulation の圧縮版。ThesisDesigner の一次情報源。失敗時はスキップ可能 |
+| `knowledge/drama_raw.md` | Experience Authoring（初回のみ・v5.2.1 NEW） | Multi-Agent Drama Simulation の 3 役対話生ログ。experience_log.md の出典であり、後日の再圧縮・デバッグ用。下流エージェントは読まない |
 | `knowledge/reader_pains.md` | Material PDCA iter 1 + 各フォールバック後 | ペインポイント・よくある疑問（上書き） |
 | `thesis.md` | Material PDCA 各 iter Phase 1 | 主張・構成・セクション骨子（上書き） |
 | `thesis_history/{iter}.md` | Material PDCA iter >= 2 の spawn 前 | 前 iter の thesis スナップショット |

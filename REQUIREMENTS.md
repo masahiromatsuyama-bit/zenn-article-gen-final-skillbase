@@ -254,7 +254,8 @@
   - Writer は experience_log を**直接参照しない**（案A・単一 source of truth 維持）。thesis.md 経由で間接的に受け取る
   - 失敗時は 3 回 retry 後スキップし、experience_log.md 無しで Material PDCA に進む。ThesisDesigner は「存在する場合のみ」扱い。report.json に `degraded_mode=true` を記録
 - **checkpoint 遷移**: `advance_topic_selection(cp)` → `phase="experience_authoring", next_action="run_experience_author"` → `advance_experience_authoring(cp)` → `phase="material_pdca", next_action="run_material_iter"`
-- **実装状態**: インターフェース層（入出力・checkpoint 遷移・Stage Dispatch）完了、`experience_author.md` の中身ロジック（ログ収集方式）は別途議論・差し替え予定
+- **実装方式（v5.2.1 確定）**: **Multi-Agent Drama Simulation**（Option E）。3 役（Human / Claude / Director）を 1 プロンプト内で演じ分け、情報非対称性を契約として守らせる（Claude はノーヒント・Director が罠を仕込む・Human はプロエンジニアで題材固有罠は未知）。Phase 1（Director 準備で罠 5-8 個抽出 → 事件 2-3 個選定） → Phase 2（8 ターン目安で drama 実行 → `drama_raw.md` 逐次追記） → Phase 3（`drama_raw.md` → `experience_log.md` 圧縮）。実装は擬似コード / 設計レベルに留める（実コードは走らせない）
+- **副産物**: `output/knowledge/drama_raw.md`（3 役対話の生ログ）。下流からは読まず、後日のデバッグ / 再圧縮用
 
 #### FR-NEW-07: major feedback による score cap（v5.1 追加、FIX-D-2）
 
