@@ -9,6 +9,7 @@ MaterialReviewerが評価する素材の基盤となる。
 - `output/strategy.md`
 - `output/knowledge/trends.md`
 - `output/knowledge/reader_pains.md`
+- `output/knowledge/experience_log.md`（存在する場合のみ。**著者の生々しい経験の一次情報源。最優先ソース**。一人称の失敗描写・固有の数値・具体的な日時・個人的な迷いは必ずここから引用する）
 - `output/knowledge/system_analysis.md`（存在する場合のみ。記事対象システムの設計解説。数値・固有名詞・ユニークな設計決定はここから引用する）
 - `output/thesis_history/{prev_iter}.md`（iter >= 2 の場合。前回 thesis のスナップショット）
 - `output/material_reviews/{prev_iter}/review.json`（iter >= 2の場合）
@@ -57,6 +58,7 @@ MaterialReviewerが評価する素材の基盤となる。
 - iter >= 2の場合は前回レビューのフィードバックを必ず反映する
 - gap_alertがある場合はそれを最優先で対処する
 - `system_analysis.md` が存在する場合、素材の具体性・実証性はこのファイルの記述を優先的に参照する（憶測での固有名詞・数値記述は避ける）
+- **`experience_log.md` が存在する場合、一人称の失敗描写・生々しい数値・具体的な日時・個人的な迷い・感情反応は、必ずここから引用する**。experience_log に書かれていない一人称挿話を憶測で書くことは**禁止**。experience_log に該当素材が無い章は、一人称挿話を省略して設計と事実の記述に絞る
 
 ## 章構造の多様化（必須）
 

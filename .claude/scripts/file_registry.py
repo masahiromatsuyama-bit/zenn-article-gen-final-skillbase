@@ -27,6 +27,7 @@ class Paths:
     # Phase 0
     KB_TRENDS = "knowledge/trends.md"
     KB_READER_PAINS = "knowledge/reader_pains.md"
+    KB_EXPERIENCE_LOG = "knowledge/experience_log.md"
 
     # Phase 1
     THESIS = "thesis.md"
@@ -95,7 +96,8 @@ PHASE_INPUTS: dict[str, list[str]] = {
     "layer1": [],
     "phase0": ["STRATEGY"],
     "phase1": ["STRATEGY", "KB_TRENDS", "KB_READER_PAINS"],
-    "material_pdca": ["THESIS", "EVAL_CRITERIA"],
+    "experience_authoring": ["STRATEGY", "KB_TRENDS", "EVAL_CRITERIA"],
+    "material_pdca": ["THESIS", "EVAL_CRITERIA", "KB_EXPERIENCE_LOG"],
     "article_pdca": ["STYLE_GUIDE", "EVAL_CRITERIA", "AGENT_MEMORY"],
 }
 

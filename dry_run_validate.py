@@ -71,9 +71,14 @@ if cp_mod:
         check("layer1: eval_designer → topic_selection/run_topic_selector",
               cp["phase"] == "topic_selection" and cp["next_action"] == "run_topic_selector")
 
-        # topic_selection → material_pdca
+        # topic_selection → experience_authoring (v5.2: 新 phase を経由)
         cp = cp_mod.advance_topic_selection(cp)
-        check("topic_selection: run_topic_selector → material_pdca/run_material_iter",
+        check("topic_selection: run_topic_selector → experience_authoring/run_experience_author",
+              cp["phase"] == "experience_authoring" and cp["next_action"] == "run_experience_author")
+
+        # experience_authoring → material_pdca
+        cp = cp_mod.advance_experience_authoring(cp)
+        check("experience_authoring: run_experience_author → material_pdca/run_material_iter",
               cp["phase"] == "material_pdca" and cp["next_action"] == "run_material_iter")
 
         # Material PDCA: iter 1, score=0.72 (below threshold, continue)
@@ -157,6 +162,8 @@ if cp_mod:
         cp_reset = cp_mod.read_checkpoint(Path(tmpdir) / "cp2.json")
         cp_reset = cp_mod.advance_layer1(cp_reset, "strategist")
         cp_reset = cp_mod.advance_layer1(cp_reset, "eval_designer")
+        cp_reset = cp_mod.advance_topic_selection(cp_reset)
+        cp_reset = cp_mod.advance_experience_authoring(cp_reset)
         for _ in range(5):
             cp_reset = cp_mod.advance_material_iter(cp_reset, score=0.70)
         check("material max iter (5) → article_pdca",
@@ -358,6 +365,27 @@ if cp_mod:
     check("FIX-5 VALID_TRANSITIONS[layer1] includes run_system_analyst",
           "run_system_analyst" in cp_mod.VALID_TRANSITIONS["layer1"])
 
+    # T9: experience_authoring phase (v5.2)
+    cp_ts = dict(cp_mod.FRESH_STATE)
+    cp_ts["phase"] = "topic_selection"
+    cp_ts["next_action"] = "run_topic_selector"
+    cp_after_ts = cp_mod.advance_topic_selection(cp_ts)
+    check("FIX-7 topic_selection → experience_authoring/run_experience_author (v5.2)",
+          cp_after_ts["phase"] == "experience_authoring"
+          and cp_after_ts["next_action"] == "run_experience_author")
+
+    cp_after_exp = cp_mod.advance_experience_authoring(cp_after_ts)
+    check("FIX-7 experience_authoring → material_pdca/run_material_iter (v5.2)",
+          cp_after_exp["phase"] == "material_pdca"
+          and cp_after_exp["next_action"] == "run_material_iter")
+
+    check("FIX-7 VALID_TRANSITIONS[experience_authoring] includes run_experience_author (v5.2)",
+          "experience_authoring" in cp_mod.VALID_TRANSITIONS
+          and "run_experience_author" in cp_mod.VALID_TRANSITIONS["experience_authoring"])
+
+    check("FIX-7 advance_experience_authoring is callable",
+          callable(getattr(cp_mod, "advance_experience_authoring", None)))
+
 # T7, T8: consolidate routing
 if cp_mod:
     # iter 1 threshold pass → finalize (skip consolidator)
@@ -389,8 +417,10 @@ print("\n[6] Spawn plan walkthrough (no actual agents)")
 # ─────────────────────────────────────────────
 print("  Simulated execution path:")
 plan = [
-    ("layer1",       "run_strategist",    "→ Spawn: strategist     → writes output/strategy.md"),
-    ("layer1",       "run_eval_designer", "→ Spawn: eval_designer  → writes output/eval_criteria.md"),
+    ("layer1",               "run_strategist",        "→ Spawn: strategist       → writes output/strategy.md"),
+    ("layer1",               "run_eval_designer",     "→ Spawn: eval_designer    → writes output/eval_criteria.md"),
+    ("topic_selection",      "run_topic_selector",    "→ Skill: zenn-topic-selection → writes knowledge/trends.md + topic.md"),
+    ("experience_authoring", "run_experience_author", "→ Spawn: experience_author → writes knowledge/experience_log.md (v5.2)"),
     ("material_pdca","run_material_iter", "→ Skill: zenn-material-pdca (iter 1)"),
     ("",             "  [iter 1]",        "  → [parallel] TrendResearcher → knowledge/trends.md"),
     ("",             "  [iter 1]",        "  → [parallel] PainExtractor   → knowledge/reader_pains.md"),

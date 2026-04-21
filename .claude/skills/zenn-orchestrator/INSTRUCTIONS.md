@@ -24,6 +24,7 @@ Layer1 → Material PDCA → Article PDCAの順に実行する。
 | `run_eval_designer` | Spawn eval_designer agent → `output/eval_criteria.md`（記事評価用・7軸）と `output/material_eval_criteria.md`（素材評価用・5軸: content_originality(0.25) / pain_coverage(0.20) / argument_novelty(0.20) / source_specificity(0.20) / thesis_coherence(0.15)、`## ベンチマーク` セクションも含める）の2ファイルを出力（入力に `human-bench/` を必ず含める） | `advance_layer1(cp, "eval_designer", requires_system_analysis=<flag>)` |
 | `run_system_analyst` | Spawn system-analyst agent → `output/knowledge/system_analysis.md` | `advance_layer1(cp, "system_analyst")` |
 | `run_topic_selector` | Invoke `zenn-topic-selection` skill → `output/topic.md` | `advance_topic_selection(cp)` |
+| `run_experience_author` | Spawn `experience_author` agent → `output/knowledge/experience_log.md` | `advance_experience_authoring(cp)` |
 | `run_material_iter` | Invoke `zenn-material-pdca` skill | `advance_material_iter(cp, score)` |
 | `run_article_iter` | Invoke `zenn-article-pdca` skill | `advance_article_iter(cp, score)` |
 | `material_fallback` | `iterations/` を `iterations_fallback_{count}/` にリネーム後、`trigger_material_fallback(cp)` | → next: `run_material_iter` |
@@ -69,10 +70,26 @@ next_action=run_system_analyst:
 next_action=run_topic_selector:
   Invoke: zenn-topic-selection skill
   入力: output/strategy.md, output/knowledge/system_analysis.md（存在する場合のみ）
-  出力: output/topic.md
-  → checkpoint: advance_topic_selection(cp) → next: run_material_iter
+  出力: output/topic.md, output/knowledge/trends.md
+  → checkpoint: advance_topic_selection(cp) → next: run_experience_author
   注意: topic.md が出力されない場合のフォールバックは zenn-topic-selection 側で処理する。
         material PDCA は topic.md の有無に関わらず実行可能。
+
+next_action=run_experience_author:
+  Spawn: experience_author agent
+  入力:
+    - output/strategy.md
+    - output/knowledge/trends.md（存在する場合のみ）
+    - output/knowledge/system_analysis.md（存在する場合のみ）
+    - output/topic.md（存在する場合のみ）
+    - output/eval_criteria.md（品質センス参考用）
+  出力: output/knowledge/experience_log.md（著者の生々しい経験の一次情報源）
+  → checkpoint: advance_experience_authoring(cp) → next: run_material_iter
+  注意:
+    - このファイルは ThesisDesigner の入力として必ず渡すこと（最優先ソース）
+    - experience_author 失敗時は 3 回 retry 後スキップし、experience_log.md 無しで
+      Material PDCA に進む。ThesisDesigner 側は「存在する場合のみ」扱い
+    - このフェーズは 1 回きり実行。iter >= 2 では再実行されない
 ```
 
 ## Material PDCA ループ制御
@@ -222,6 +239,7 @@ action = route_next_action(cp)
 |------|------|
 | agent spawn失敗 | 3回retry後スキップ。checkpointは更新せず再試行可能な状態を保つ |
 | SystemAnalyst失敗 | `requires_system_analysis=false` に降格し `run_material_iter` へ進む（knowledge 無しで継続）。`system_analysis.md` が無いまま ThesisDesigner / Writer に渡すときは「このファイルは存在しない」ことを明示してスキップ指示を出す |
+| ExperienceAuthor失敗 | 3回retry後、`advance_experience_authoring(cp)` で Material PDCA に進む（`experience_log.md` 無しで継続）。ThesisDesigner は「存在する場合のみ」扱いなので、ファイル不在でもループは回る。ただし生々しさ注入が効かないため品質が落ちる旨を report.json の `degraded_mode` フラグに記録 |
 | Consolidator失敗 | Consolidator 前の `iterations/{N}/article.md` を保持したまま `advance_after_consolidate(cp)` で finalize へ進む（統合なしで元記事を最終出力） |
 | スコア取得失敗 | 0.70をデフォルトスコアとして使用しループ継続 |
 | checkpoint書き込み失敗 | ログ記録しメモリ上の状態で継続（次回起動時はfresh startになる） |

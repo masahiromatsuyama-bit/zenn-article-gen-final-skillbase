@@ -44,7 +44,7 @@ iter==1 では PainExtractor のみ spawn する。
 
 **Step 2: ThesisDesigner を spawn**
 
-- 入力: `strategy.md`, `knowledge/trends.md`（存在する場合のみ。Topic Selectionが生成）, `knowledge/reader_pains.md`, `knowledge/system_analysis.md`（存在する場合のみ）, `output/topic.md`（存在する場合のみ。存在しない場合は strategy.md のスコープ情報を代わりに使用）
+- 入力: `strategy.md`, `knowledge/trends.md`（存在する場合のみ。Topic Selectionが生成）, `knowledge/reader_pains.md`, `knowledge/experience_log.md`（存在する場合のみ。**著者の生々しい経験の一次情報源。最優先**）, `knowledge/system_analysis.md`（存在する場合のみ）, `output/topic.md`（存在する場合のみ。存在しない場合は strategy.md のスコープ情報を代わりに使用）
 - 出力: `thesis.md`
 - 返却: ファイルパス + 2〜4文サマリー
 
@@ -125,6 +125,7 @@ if should_trigger_gap_alert(score_history, MATERIAL_THRESHOLD):
 - 入力:
   - `strategy.md`
   - `knowledge/trends.md`（存在する場合のみ）, `knowledge/reader_pains.md`
+  - `knowledge/experience_log.md`（存在する場合のみ。**著者の生々しい経験の一次情報源。最優先**）
   - `knowledge/system_analysis.md`（存在する場合のみ）
   - `output/topic.md`（存在する場合のみ。存在しない場合は strategy.md のスコープ情報を代わりに使用）
   - `thesis_history/{iter-1}.md`（前回 thesis スナップショット）

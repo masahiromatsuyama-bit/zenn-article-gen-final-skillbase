@@ -28,6 +28,7 @@ FRESH_STATE: Dict = {
 VALID_TRANSITIONS: Dict[str, list] = {
     "layer1": ["run_strategist", "run_eval_designer", "run_system_analyst"],
     "topic_selection": ["run_topic_selector"],
+    "experience_authoring": ["run_experience_author"],
     "material_pdca": ["run_material_iter", "material_fallback"],
     "article_pdca": ["run_article_iter", "material_fallback", "consolidate", "finalize"],
     "done": ["done"],
@@ -94,7 +95,19 @@ def advance_layer1(
 
 
 def advance_topic_selection(checkpoint: Dict) -> Dict:
-    """topic_selection 完了後に material_pdca へ進む。"""
+    """topic_selection 完了後に experience_authoring へ進む。
+
+    v5.2 で導入された experience_authoring phase を経由する。著者の生々しい
+    経験ログ (knowledge/experience_log.md) を作成してから Material PDCA に入る。
+    """
+    cp = dict(checkpoint)
+    cp["phase"] = "experience_authoring"
+    cp["next_action"] = "run_experience_author"
+    return cp
+
+
+def advance_experience_authoring(checkpoint: Dict) -> Dict:
+    """experience_authoring 完了後に material_pdca へ進む。"""
     cp = dict(checkpoint)
     cp["phase"] = "material_pdca"
     cp["next_action"] = "run_material_iter"
