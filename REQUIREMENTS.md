@@ -255,6 +255,11 @@
   - 失敗時は 3 回 retry 後スキップし、experience_log.md 無しで Material PDCA に進む。ThesisDesigner は「存在する場合のみ」扱い。report.json に `degraded_mode=true` を記録
 - **checkpoint 遷移**: `advance_topic_selection(cp)` → `phase="experience_authoring", next_action="run_experience_author"` → `advance_experience_authoring(cp)` → `phase="material_pdca", next_action="run_material_iter"`
 - **実装方式（v5.2.1 確定）**: **Multi-Agent Drama Simulation**（Option E）。3 役（Human / Claude / Director）を 1 プロンプト内で演じ分け、情報非対称性を契約として守らせる（Claude はノーヒント・Director が罠を仕込む・Human はプロエンジニアで題材固有罠は未知）。Phase 1（Director 準備で罠 5-8 個抽出 → 事件 2-3 個選定） → Phase 2（8 ターン目安で drama 実行 → `drama_raw.md` 逐次追記） → Phase 3（`drama_raw.md` → `experience_log.md` 圧縮）。実装は擬似コード / 設計レベルに留める（実コードは走らせない）
+- **Phase 1 の主題収束機構（v5.2.2 追加）**: 初期実装では事件が水平に並び、Phase 3 圧縮時に主題が二股に割れる問題があった（初回 E2E で確認）。対策として Phase 1 を 3 ステップに再構成:
+  - **Phase 1.0**: Director が「中心学び 1 文」を先決め（「Skill の凍結領域はサンプル値と暗黙参照にある」等、読者が 3 日後に口頭で説明できる強度の 1 文）
+  - **Phase 1.1**: 罠候補に L1（表層・ファイル名 or 記号レベル） / L2（運用ほつれ・silent skip・暗黙依存） / L3（設計原理の葛藤・インライン vs 外出し等）の severity を付与し、中心学びに奉仕する罠のみ 5-8 個抽出
+  - **Phase 1.2**: 事件を**表層 → 中層 → 底層の 3 層連鎖**として 2-3 個選ぶ。ゲート: 最低 1 個は L3、L1 単独事件は却下、中心学びと論点がずれる罠は除外
+  - **Phase 3 収束点**: `experience_log.md` 冒頭に `## この経験ログの中心学び（1 文）` セクションを必須化し、ThesisDesigner の anchor にする
 - **副産物**: `output/knowledge/drama_raw.md`（3 役対話の生ログ）。下流からは読まず、後日のデバッグ / 再圧縮用
 
 #### FR-NEW-07: major feedback による score cap（v5.1 追加、FIX-D-2）

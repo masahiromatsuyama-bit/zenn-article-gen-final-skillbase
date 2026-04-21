@@ -256,6 +256,7 @@ checkpoint 更新: phase="material_pdca", next_action="run_material_iter"
 
 - **目的**: Material PDCA が LLM 想像による一人称挿話を捏造する病を断つ。著者の生々しい経験を一次情報源として外部化し、ThesisDesigner が必ずこのファイルから引用する運用にする
 - **実装方式（v5.2.1 NEW）**: **Multi-Agent Drama Simulation**（Option E）を採用。3 役（Human / Claude / Director）を 1 プロンプト内で演じ分け、情報非対称性（Claude はノーヒント・Director が罠を仕込む・Human はプロエンジニアで題材システム固有の罠は未知）を契約として守らせる。8 ターン目安で事件 2-3 個を発火させ、試行錯誤のログを `drama_raw.md` に蓄積、その圧縮が `experience_log.md`
+- **Phase 1 の主題収束機構（v5.2.2 NEW）**: 事件が水平に散って主題が二股に割れる問題への対策。Phase 1.0 で Director が「中心学び 1 文」を先決めし、Phase 1.1 で罠候補に L1（表層） / L2（運用ほつれ） / L3（設計原理の葛藤） の severity を付けて**中心学びに奉仕する罠のみ**を抽出、Phase 1.2 で事件を**表層 → 中層 → 底層の 3 層連鎖**として並べる。ゲート: 最低 1 個は L3、L1 単独事件は却下、中心学びと論点がずれる罠は `## 使わない素材` 行き
 - **検討された代替案**: Option A（著者対話）/ B（git・PR mining）/ C（単発 Synthesis）/ D（B+A Hybrid）。A/D は著者手作業コスト、B は一次資料アクセス前提、C は AI 臭の温床と判断し、情報非対称で構造化シミュレーションする E を採用
 - **入力**: Topic Selection までに生成された全ファイル（reader_pains.md は Material PDCA 内部生成のため含まない）
 - **出力**: `knowledge/experience_log.md`（固定テンプレート準拠・下流入力）+ `knowledge/drama_raw.md`（副産物・下流は読まない）
