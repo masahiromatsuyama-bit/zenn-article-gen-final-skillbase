@@ -216,6 +216,47 @@ if met_mod:
           f"code_ratio={m3.code_ratio:.2f}, desu_masu={m3.desu_masu_ratio:.2f}, consec={m3.max_consecutive_same_length}")
 
 # ─────────────────────────────────────────────
+print("\n[3b] metrics.py — AI syntactic template detection")
+# ─────────────────────────────────────────────
+if met_mod:
+    # Positive: the exact self-contradicting pattern caught in the 2026-04-22 E2E —
+    # "多くの X は…私もそうでした" appeared in ch.2 while ch.3 explicitly
+    # criticised the same framing as AI-typical. Reviewer's fixed weird-phrasing
+    # list missed it; this regex-based detector must catch it.
+    bad_text = (
+        "多くの人は pain_extractor.md のプロンプト文面か、spawn の順序を触ります。"
+        "私もそうでした。土曜午前、30分触って止まります。"
+    )
+    hits_bad = met_mod.detect_ai_templates(bad_text)
+    check("AI template: 『多くの人は…私もそうでした』 が検出される (general_then_assimilate)",
+          any(h["pattern_label"] == "general_then_assimilate" for h in hits_bad),
+          f"hits={hits_bad}")
+
+    # Positive: empathy_lure
+    empathy = "私も実はここで半年ハマりました。今なら笑えます。"
+    hits_empathy = met_mod.detect_ai_templates(empathy)
+    check("AI template: 『私も実は…ハマり』 が検出される (empathy_lure)",
+          any(h["pattern_label"] == "empathy_lure" for h in hits_empathy),
+          f"hits={hits_empathy}")
+
+    # Negative: a plain technical paragraph must NOT fire (no false positives)
+    clean_text = (
+        "第 3 章では 4 列表を列ごとに読み解きます。入力ファイル数 1 vs 5 の列で、"
+        "PainExtractor は strategy.md のみ、ExperienceAuthor は 5 ファイルです。"
+        "単独 READ では気づけません。"
+    )
+    hits_clean = met_mod.detect_ai_templates(clean_text)
+    check("AI template: plain technical prose → 0 hits (no false positive)",
+          len(hits_clean) == 0,
+          f"hits={hits_clean}")
+
+    # Return shape contract
+    check("AI template: return is list[dict] with required keys",
+          all(isinstance(h, dict) and {"pattern_label", "matched_text", "start"} <= h.keys()
+              for h in hits_bad),
+          f"hits_bad={hits_bad}")
+
+# ─────────────────────────────────────────────
 print("\n[4] fb_log.py — diffs bug fix")
 # ─────────────────────────────────────────────
 fb_mod = modules.get("fb_log")

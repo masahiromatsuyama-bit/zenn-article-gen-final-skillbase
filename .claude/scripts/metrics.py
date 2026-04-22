@@ -308,3 +308,65 @@ def _merge_adjacent_lines(lines: list[str]) -> list[str]:
                     k += 2
             run_start = j
     return [line for i, line in enumerate(result) if i not in merged]
+
+
+# AI syntactic templates — structural siblings of the literal weird-phrasing
+# list in article_reviewer.md item 7. The fixed list catches noun-level
+# metaphors ("辺縁の〜"); these patterns catch *sentence-level* rhetorical
+# templates that survive the fixed list but still read as AI-typical.
+#
+# Detected by the E2E on 2026-04-22: article containing
+# "多くの人は〜。私もそうでした。" passed HARD FAIL cleanly and the
+# reviewer (which only greps the fixed list) gave it score 0.81, but the
+# same article in section 3 explicitly criticised "多くのエンジニアが〜"
+# framings as AI-typical. Self-contradiction the reviewer could not catch.
+AI_SYNTACTIC_TEMPLATES: list[tuple[str, str]] = [
+    (
+        r"多く(の人|のエンジニア|の開発者|の読者|の方|のユーザ)(は|が)[^。]{3,120}。[ 　]*[^。]{0,40}(私|自分|僕|俺)(も|も実は|もまさに|も昔)[^。]{0,40}そうでした",
+        "general_then_assimilate",  # 一般論→後付け同化（「多くのXは…私もそうでした」）
+    ),
+    (
+        r"(私|自分|僕|俺)(も実は|もまさに|も昔は|も以前)[^。]{0,60}(ハマり|踏み|やってしまい|陥り|悩み)",
+        "empathy_lure",  # 共感誘導（「私も実は…ハマり」）
+    ),
+    (
+        r"[^。]{10,100}ではないでしょうか[?？。]",
+        "rhetorical_question",  # レトリック疑問
+    ),
+    (
+        r"結論から(先に|)(言う|書く|述べる)と[、,]",
+        "formulaic_conclusion_opener",  # 「結論から先に言うと、」の定型
+    ),
+    (
+        r"(つまり|要するに|一言で言うと)[、,][^。]{0,80}ということ(です|になります)",
+        "wrap_up_restatement",  # 「つまり〜ということです」の定型再述
+    ),
+]
+
+
+def detect_ai_templates(article_text: str) -> list[dict]:
+    """Detect AI-typical sentence-level syntactic templates.
+
+    Complements the literal weird-phrasing list in article_reviewer.md item 7.
+    That list catches specific metaphor *phrases* via substring match;
+    this function catches structural *templates* via regex.
+
+    Returns a list of {"pattern_label", "matched_text", "start"}.
+    Empty list if nothing detected. Caller (ArticleReviewer prompt) decides
+    whether to promote hits to major / minor feedback.
+
+    Kept separate from check_hard_fail() because weird-phrasing severity is
+    a prompt-level judgement call (some patterns are idiomatic in context),
+    not a hard statistical gate like desu_masu_ratio.
+    """
+    hits: list[dict] = []
+    for pattern, label in AI_SYNTACTIC_TEMPLATES:
+        for m in re.finditer(pattern, article_text):
+            hits.append(
+                {
+                    "pattern_label": label,
+                    "matched_text": m.group(0)[:120],
+                    "start": m.start(),
+                }
+            )
+    return hits
