@@ -124,12 +124,14 @@ if hf.applied:
 
 ### Step 4: ArticleReviewer を spawn
 
-- 入力: `iterations/{iter}/article.md`, `eval_criteria.md`, `agent_memory/memory.json`（存在する場合）, `human-bench/articles/`（eval_criteria.md ## ベンチマーク で参照されている3-4本）
+- 入力: `iterations/{iter}/article.md`, `eval_criteria.md`, `agent_memory/memory.json`（存在する場合）, `human-bench/articles/`（eval_criteria.md ## ベンチマーク で参照されている3-4本）, `knowledge/trends.md`（存在する場合のみ・A/B 比較 Round 2 の対戦相手候補として渡す。詳細は `article_reviewer.md` の「ペルソナ A/B 比較ブロック」節参照）
 - 採点方針（必須）:
   - 各軸のコメントには、参照したベンチマーク記事（タイトルを明記）と比較して何が優れているか・何が劣っているかを具体的に書くこと。
   - 生成物がベンチマーク記事と同等以下の品質の軸は、スコアを 0.75 上限とする。
   - ベンチマーク記事を明確に上回っている場合のみ 0.80 以上を許容する。
   - 「ベンチXXのYYに比べて〜が不足」という形式で feedback の text を書くこと。この形式を守れない feedback は minor ではなく major として扱うこと。
+  - **AI 構文テンプレ検出**: `python3 -c "import sys; sys.path.insert(0, '.claude/scripts'); import metrics; print(metrics.detect_ai_templates(open('output/iterations/{iter}/article.md').read()))"` を必ず実行し、戻り値が非空なら major 付与（`article_reviewer.md` 項目 8 参照）
+  - **A/B Round 2**: `knowledge/trends.md` が存在する場合、Round 1（human-bench 対戦）に加えて Round 2（trends 上位記事との対戦）も必ず実施すること
 - 出力: `iterations/{iter}/review.json`
   ```json
   {
